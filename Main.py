@@ -1,6 +1,6 @@
 from abc import ABC,abstractmethod
 import tkinter as tk
-from tkinter import ttk,filedialog
+from tkinter import FALSE, Menu, ttk,filedialog
 import math
 from tkinter import messagebox
 from tkinter.messagebox import showwarning, showinfo
@@ -16,7 +16,7 @@ import datetime
 import matplotlib.pyplot as plt
 
 class GuiManager:
-    def __init__(self, root, data_model,fulCalc,result):
+    def __init__(self, root: tk.Tk, data_model,fulCalc,result):
         self.root = root
         self.data_model = data_model
         self.fulCalc = fulCalc
@@ -24,10 +24,21 @@ class GuiManager:
         self.style = ttk.Style(root)
 
 
-        root.title("Расчеты газовых систем")
-        root.geometry("700x300")  # Начальный размер окна
-        root.minsize(700, 300)     # Минимальный размер окна
+        self.root.title("Расчеты газовых систем")
+        self.root.geometry("700x300")  # Начальный размер окна
+        self.root.minsize(700, 300)     # Минимальный размер окна
+        
+        self.root.option_add("*tearOff", FALSE)
+ 
+        main_menu = Menu()
+        
+        main_menu.add_cascade(label="File")
+        main_menu.add_cascade(label="Настройка")
+        main_menu.add_cascade(label="Справка")
+        
+        self.root.config(menu=main_menu)
 
+        
         # Настраиваем стили
         # Убираем пунктирную рамку вокруг активной вкладки
         # Полностью убираем рамки и выделение для вкладок
@@ -56,31 +67,28 @@ class GuiManager:
         self.style.configure("Custom.TNotebook", tabposition="n", background="#e0e0e0")
         self.notebook.pack(fill="both", expand=True)
 
-        # Создаем фреймы для каждой вкладки
-        self.tab1 = ttk.Frame(self.notebook)  # Исходные данные
-        self.tab2 = ttk.Frame(self.notebook)  # Свойства газа
-        self.tab3 = ttk.Frame(self.notebook)  # Расчет пропускной способности трубы
-        self.tab4 = ttk.Frame(self.notebook)  # Расчет регулятора
-        self.tab5 = ttk.Frame(self.notebook)  # Расчет регулятора
+        # Создаем ссписок для названий вкладок расчетов
+        tabs_name = ["Исходные данные", "Свойства газа", "Расчет пропускной способности трубы", "Расчет регулятора", "Тепловой баланс"]
+        
+        # Создаем словарь для хранения фреймов
+        self.tabs = {}
 
-        # Добавляем фреймы в Notebook как вкладки
-        self.notebook.add(self.tab1, text="Исходные данные")
-        self.notebook.add(self.tab2, text="Свойства газа")
-        self.notebook.add(self.tab3, text="Расчет пропускной способности трубы")
-        self.notebook.add(self.tab4, text="Расчет регулятора")
-        self.notebook.add(self.tab5, text="Тепловой баланс")
+        for name in tabs_name:
+            frame = ttk.Frame(self.notebook)
+            self.tabs[name] = frame  # Сохраняем фрейм в словаре
+            self.notebook.add(frame, text=name)
 
         # Инициализация менеджеров для каждой функциональности
-        self.gas_composition_manager = GasCompositionManager(self.tab1, self.data_model)
-        self.tempearure_manager = TemperatureManager(self.tab1, self.data_model)
-        self.pressure_range_manager = PressureRangeManager(self.tab1, self.data_model)
-        self.table_manager = TableManager(self.tab1,self.data_model)
-        self.gas_properties_manager = GasPropertiesManager(self.tab2,self.data_model)
-        self.tube_properties_manager = TubePropertiesManager(self.tab3,self.data_model)
-        self.regulatormanager = RegulatorManager(self.tab4,self.data_model)
-        self.heatbalancemanager = HeatBalanceManager(self.tab5,self.data_model)
+        self.gas_composition_manager = GasCompositionManager(self.tabs["Исходные данные"], self.data_model)
+        self.tempearure_manager = TemperatureManager(self.tabs["Исходные данные"], self.data_model)
+        self.pressure_range_manager = PressureRangeManager(self.tabs["Исходные данные"], self.data_model)
+        self.table_manager = TableManager(self.tabs["Исходные данные"],self.data_model)
+        self.gas_properties_manager = GasPropertiesManager(self.tabs["Свойства газа"],self.data_model)
+        self.tube_properties_manager = TubePropertiesManager(self.tabs["Расчет пропускной способности трубы"],self.data_model)
+        self.regulatormanager = RegulatorManager(self.tabs["Расчет регулятора"],self.data_model)
+        self.heatbalancemanager = HeatBalanceManager(self.tabs["Тепловой баланс"],self.data_model)
 
-        calculate_button = ttk.Button(self.tab1, text="Автоматический расчет", command= self.result.result_table)
+        calculate_button = ttk.Button(self.tabs["Исходные данные"], text="Автоматический расчет", command= self.result.result_table)
         calculate_button.grid(row=7, column=0, padx=5, pady=5) #  Разместите кнопку на сетке
 
 class WidgetFactory:  
@@ -1397,5 +1405,6 @@ if __name__ == "__main__":
     fulCalc = Max_performance(data_model,save_result)
     result =Result(data_model,fulCalc,save_result)
     app = GuiManager(root, data_model,fulCalc,result)
+    
     root.mainloop()
     
