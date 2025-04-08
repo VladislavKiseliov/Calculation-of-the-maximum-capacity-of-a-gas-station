@@ -32,11 +32,11 @@ class GuiManager:
  
         main_menu = Menu()
         
-        main_menu.add_cascade(label="File")
-        main_menu.add_cascade(label="Настройка")
-        main_menu.add_cascade(label="Справка")
+        # main_menu.add_cascade(label="File")
+        # main_menu.add_cascade(label="Настройка")
+        # main_menu.add_cascade(label="Справка")
         
-        self.root.config(menu=main_menu)
+        # self.root.config(menu=main_menu)
 
         
         # Настраиваем стили
