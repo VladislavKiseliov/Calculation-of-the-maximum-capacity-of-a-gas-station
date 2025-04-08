@@ -12,8 +12,8 @@ import csv
 import sqlite3
 from typing import List, Dict, Any,Optional,TypedDict
 import logger_config 
-import datetime
 import matplotlib.pyplot as plt
+import json
 
 class GuiManager:
     def __init__(self, root: tk.Tk, data_model,fulCalc,result):
@@ -22,23 +22,37 @@ class GuiManager:
         self.fulCalc = fulCalc
         self.result = result
         self.style = ttk.Style(root)
+        self._create_menu()
+        self._create_style()
+        self._create_notebook()
 
+
+
+        # Инициализация менеджеров для каждой функциональности
+        self.gas_composition_manager = GasCompositionManager(self.tabs["Исходные данные"], self.data_model)
+        self.tempearure_manager = TemperatureManager(self.tabs["Исходные данные"], self.data_model)
+        self.pressure_range_manager = PressureRangeManager(self.tabs["Исходные данные"], self.data_model)
+        self.table_manager = TableManager(self.tabs["Исходные данные"],self.data_model)
+        self.gas_properties_manager = GasPropertiesManager(self.tabs["Свойства газа"],self.data_model)
+        self.tube_properties_manager = TubePropertiesManager(self.tabs["Расчет пропускной способности трубы"],self.data_model)
+        self.regulatormanager = RegulatorManager(self.tabs["Расчет регулятора"],self.data_model)
+        self.heatbalancemanager = HeatBalanceManager(self.tabs["Тепловой баланс"],self.data_model)
 
         self.root.title("Расчеты газовых систем")
         self.root.geometry("700x300")  # Начальный размер окна
         self.root.minsize(700, 300)     # Минимальный размер окна
         
-        self.root.option_add("*tearOff", FALSE)
- 
-        main_menu = Menu()
-        
-        # main_menu.add_cascade(label="File")
-        # main_menu.add_cascade(label="Настройка")
-        # main_menu.add_cascade(label="Справка")
-        
-        # self.root.config(menu=main_menu)
 
-        
+    def _create_menu(self):
+        self.root.option_add("*tearOff", FALSE)
+
+        main_menu = Menu()
+        main_menu.add_cascade(label="Файл")
+        main_menu.add_cascade(label="Настройка")
+        main_menu.add_cascade(label="Справка")
+        self.root.config(menu=main_menu)
+
+    def _create_style(self): 
         # Настраиваем стили
         # Убираем пунктирную рамку вокруг активной вкладки
         # Полностью убираем рамки и выделение для вкладок
@@ -61,7 +75,8 @@ class GuiManager:
         self.style.configure("TButton", font=("Arial", 10, "bold"), padding=5, background="#4CAF50")
         self.style.configure("Treeview", rowheight=25, font=("Arial", 10))
         self.style.map("TButton", background=[("active", "#45a049")])
-        
+    
+    def _create_notebook(self):   
         # Создаем Notebook с стилем
         self.notebook = ttk.Notebook(root, style="Custom.TNotebook")
         self.style.configure("Custom.TNotebook", tabposition="n", background="#e0e0e0")
@@ -77,16 +92,6 @@ class GuiManager:
             frame = ttk.Frame(self.notebook)
             self.tabs[name] = frame  # Сохраняем фрейм в словаре
             self.notebook.add(frame, text=name)
-
-        # Инициализация менеджеров для каждой функциональности
-        self.gas_composition_manager = GasCompositionManager(self.tabs["Исходные данные"], self.data_model)
-        self.tempearure_manager = TemperatureManager(self.tabs["Исходные данные"], self.data_model)
-        self.pressure_range_manager = PressureRangeManager(self.tabs["Исходные данные"], self.data_model)
-        self.table_manager = TableManager(self.tabs["Исходные данные"],self.data_model)
-        self.gas_properties_manager = GasPropertiesManager(self.tabs["Свойства газа"],self.data_model)
-        self.tube_properties_manager = TubePropertiesManager(self.tabs["Расчет пропускной способности трубы"],self.data_model)
-        self.regulatormanager = RegulatorManager(self.tabs["Расчет регулятора"],self.data_model)
-        self.heatbalancemanager = HeatBalanceManager(self.tabs["Тепловой баланс"],self.data_model)
 
         calculate_button = ttk.Button(self.tabs["Исходные данные"], text="Автоматический расчет", command= self.result.result_table)
         calculate_button.grid(row=7, column=0, padx=5, pady=5) #  Разместите кнопку на сетке
@@ -155,8 +160,10 @@ class GasCompositionManager:
 
         self.total_label = WidgetFactory.create_label(parent=self.gas_window,label_text="Сумма: 0.0%",row=math.floor((len(self.components)/2)),column = 4  )
         # Load previously saved composition, if available
+
         self.row_last_components = math.ceil((len(self.components)/2)+1)
         self.load_gas_composition()
+
         # Кнопка для сохранения данных
         save_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", self.row_last_components,(lambda : self.data_model.set_gas_composition(self.entries,self.gas_window)))
     #Кнопка для сохранения в файл
@@ -190,6 +197,7 @@ class GasCompositionManager:
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
     def load_gas_composition(self):
+
         """Loads the gas composition from the data model and updates the entry fields."""
         saved_composition = self.data_model.get_gas_composition()
         for component, entry in self.entries.items():
@@ -610,7 +618,6 @@ class TableFactory:
                 logger.info(f"Создан менеджер таблицы труб: {table_type}")
                 return PipeTableManager(parent, data_model)
             
-            
             case _:
                 error_msg = f"Неизвестный тип таблицы: {table_type}"
                 logger.error(error_msg)
@@ -1023,7 +1030,7 @@ class Data_model:
             logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
         return df.to_dict(orient="records")[0]  # Список словарей
 
-    def set_tables_data(self, tables):
+    def set_tables_data(self, tables: Dict[Any,str]):
         self.tables_data = tables
         print(self.tables_data)
         logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")
@@ -1042,7 +1049,7 @@ class Data_model:
 
     def get_temperature(self):
         return self.temperature
-
+    
 class RegulatorManager:
     def __init__(self, parent,data_model):
         self.parent = parent
@@ -1375,28 +1382,10 @@ class Save_intermediate_result:
             df.to_sql(name_P_out, conn, if_exists="replace", index=True)
         logger.info(f"Промежуточная таблица {name_P_out=} сохранена в базе данных")
 
-def create_log_file():
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)  # Создаем директорию, если её нет
-    # Получаем текущую дату и время
-    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")  # Формат: ГГГГММДД_ЧЧММСС
-    filename = os.path.join(log_dir, f"app_log_{current_time}.log")
-    
-    # Создаем файл (если он не существует)
-    try:
-        with open(filename, "x",encoding="utf-8") as f:  # Режим 'x' создает файл, если его нет
-            f.write(f"Программа запущена: {current_time}\n")
-        print(f"Файл '{filename}' создан.")
-    except FileExistsError:
-        print(f"Файл '{filename}' уже существует.")
-    except Exception as e:
-        print(f"Ошибка создания файла: {e}")
-    return filename
-
 if __name__ == "__main__":
     
     # Настройка логгера
-    filename =create_log_file() 
+    filename =logger_config.create_log_file() 
     logger = logger_config.setup_logger(filename)
     
     save_result = Save_intermediate_result()
