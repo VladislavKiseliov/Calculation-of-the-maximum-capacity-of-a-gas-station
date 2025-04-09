@@ -16,9 +16,10 @@ import matplotlib.pyplot as plt
 import json
 
 class GuiManager:
-    def __init__(self, root: tk.Tk, data_model,fulCalc,result):
+    def __init__(self, root: tk.Tk, data_model:'Data_model',fulCalc,result,datasaverloader:'DataSaverLoader'):
         self.root = root
         self.data_model = data_model
+        self.datasaverloader=datasaverloader
         self.fulCalc = fulCalc
         self.result = result
         self.style = ttk.Style(root)
@@ -95,6 +96,9 @@ class GuiManager:
 
         calculate_button = ttk.Button(self.tabs["Исходные данные"], text="Автоматический расчет", command= self.result.result_table)
         calculate_button.grid(row=7, column=0, padx=5, pady=5) #  Разместите кнопку на сетке
+        datasaverloader
+        save_button = ttk.Button(self.tabs["Исходные данные"], text="Сохранить данные", command= self.datasaverloader.save_data)
+        save_button.grid(row=8, column=0, padx=5, pady=5) #  Разместите кнопку на сетке
 
 class WidgetFactory:  
     @staticmethod
@@ -116,7 +120,7 @@ class WidgetFactory:
         return Button
     
 class GasCompositionManager:
-    def __init__(self, parent, data_model):
+    def __init__(self, parent, data_model:'Data_model'):
         self.parent = parent
         self.data_model = data_model
         self.create_widgets()
@@ -290,7 +294,7 @@ class GasCompositionManager:
             showwarning("Ошибка", f"Не удалось загрузить из файла: {e}")
 
 class TemperatureManager:
-    def __init__(self, parent, data_model):
+    def __init__(self, parent, data_model:'Data_model'):
         self.parent = parent
         self.data_model = data_model
         self.create_widgets()
@@ -358,7 +362,7 @@ class TemperatureManager:
             showinfo("Ошибка", "Произошла непредвиденная ошибка. Проверьте логи.")
 
 class PressureRangeManager:
-    def __init__(self, parent, data_model):
+    def __init__(self, parent, data_model:'Data_model'):
         self.parent = parent  # Окно
         self.data_model = data_model  # Передаем класс для расчета
         self.create_widgets()
@@ -419,15 +423,19 @@ class PressureRangeManager:
             showwarning("Ошибка", "Введите корректные числовые значения!")
 
 class BaseTableManager(ABC):
-    def __init__(self,parent,data_model):
+    def __init__(self,parent,data_model:'Data_model',table_type):
         self.parent = parent
         self.data_model = data_model
         self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
+        self.table_type = table_type
 
     @abstractmethod
     def get_columns(self) -> list:
         pass
-
+    
+    def get_table_type(self):
+        return self.table_type
+    
     def create_table(self,table_name):
         """Create table in databaze"""
             # Логирование начала создания таблицы
@@ -608,15 +616,15 @@ class TableFactory:
         match table_type:
             case "Таблица для регуляторов":
                 logger.info("Создан менеджер таблицы регуляторов")
-                return RegulatorTableManager(parent, data_model)
+                return RegulatorTableManager(parent, data_model,table_type)
             
             case "Таблица котельной":
                 logger.info("Создан менеджер таблицы котельной")
-                return BoilerTableManager(parent, data_model)
+                return BoilerTableManager(parent, data_model,table_type)
             
             case "Таблицы для труб до регулятора" | "Таблицы для труб после регулятора":
                 logger.info(f"Создан менеджер таблицы труб: {table_type}")
-                return PipeTableManager(parent, data_model)
+                return PipeTableManager(parent, data_model,table_type)
             
             case _:
                 error_msg = f"Неизвестный тип таблицы: {table_type}"
@@ -753,7 +761,8 @@ class TableManager:
         logger.debug("Создание менеджера таблицы через TableFactory")
         manager = TableFactory.create_table_manager(table_type, self.parent, self.data_model)
         manager.create_table(table_name)
-        self.tables[table_name] = [manager, table_type]
+        print(f"{manager=}")
+        self.tables[table_name] = manager
         self.data_model.set_tables_data(self.tables)
         logger.info(f"Таблица '{table_name}' добавлена в реестр")
 
@@ -764,7 +773,7 @@ class TableManager:
             self.add_table(table_name, table_type)
   
         logger.debug("Открытие окна таблицы через менеджер")
-        self.tables[table_name][0].open_table_window(table_name)
+        self.tables[table_name].open_table_window(table_name)
         logger.info(f"Таблица '{table_name}' открыта")
 
     def save_table(self, table_name):
@@ -780,7 +789,7 @@ class TableManager:
             messagebox.showerror("Ошибка", f"Таблица '{table_name}' не найдена!")
 
 class GasPropertiesManager:
-    def __init__(self, parent,data_model):
+    def __init__(self, parent,data_model:'Data_model'):
         self.parent = parent
         self.data_model = data_model
         self.create_widgets()
@@ -825,7 +834,7 @@ class GasPropertiesManager:
 
 class TubePropertiesManager:
     
-    def __init__(self, parent,data_model):
+    def __init__(self, parent,data_model:'Data_model'):
         self.parent = parent
         self.data_model = data_model
         self.entries = {}
@@ -919,12 +928,13 @@ class Data_model:
         self.output_pressure_range = None
         self.tables_data = {}
         self.gas_properties = {}
+        self.temperature = {}
         self.db_path = "tables.db"
 
-    def get_gas_composition(self):
+    def get_gas_composition(self)-> Dict[str,float] :
         return self.gas_composition
 
-    def set_gas_composition(self, composition,gas_window):
+    def set_gas_composition(self, composition: Dict[str,ttk.Entry], gas_window):
         # Сохраняем введенные данные
         total_percentage = 0.0
         self.gas_composition = {} #Очищаем словарь, что бы не накладывало значения
@@ -962,13 +972,13 @@ class Data_model:
         logger.info(f"Состав газа установлен из файла: {self.gas_composition}")
         print(f"Состав газа установлен из файла: {self.gas_composition}")    
     
-    def get_input_pressure_range(self):
+    def get_input_pressure_range(self)-> List[float]:
         return self.input_pressure_range
 
-    def get_output_pressure_range(self):
+    def get_output_pressure_range(self)-> List[float]:
         return self.output_pressure_range
 
-    def _calculate_pressure_range(self, min_pressure_entry, max_pressure_entry, average_value_entry):
+    def _calculate_pressure_range(self, min_pressure_entry, max_pressure_entry, average_value_entry)-> List[float]:
         try:
             # Проверка на пустые значения
 
@@ -1018,7 +1028,7 @@ class Data_model:
             logger.error(f"Не удалось сохранить данные: {e}")
             showwarning("Ошибка", f"Не удалось сохранить данные: {e}")
 
-    def get_tables_data(self):
+    def get_table_manager(self)->List[Dict[str, Any]]:
         """Возвращаем название и тип таблиц"""
         return self.tables_data
 
@@ -1030,7 +1040,7 @@ class Data_model:
             logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
         return df.to_dict(orient="records")[0]  # Список словарей
 
-    def set_tables_data(self, tables: Dict[Any,str]):
+    def set_tables_data(self, tables: Dict[str,Any]):
         self.tables_data = tables
         print(self.tables_data)
         logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")
@@ -1042,12 +1052,11 @@ class Data_model:
         self.gas_properties = gas_properties
         logger.info(f"Данные свойств газа {self.gas_properties} сохранены в Data_model")
 
-    
-    def set_temperature(self,temp_in,temp_out):
+    def set_temperature(self,temp_in: float,temp_out:float):
         self.temperature = {"in":temp_in,"out":temp_out}
         logger.info(f"Данные температуры газа {self.temperature} сохранены в Data_model")
 
-    def get_temperature(self):
+    def get_temperature(self)-> Dict[str,float]:
         return self.temperature
     
 class RegulatorManager:
@@ -1153,14 +1162,14 @@ class HeatBalanceManager:
         self.heat_balance_text.config(state="disabled")
 
 class Max_performance:
-    def __init__(self,data_model,save_result):
+    def __init__(self,data_model:Data_model,save_result):
         self.data_model = data_model
         self.save_result = save_result
 
     def get_data(self):# берем остольные данные из class Data Model
         self.input_pressure_range = self.data_model.get_input_pressure_range() #Диапазон входного давления
         self.output_pressure_range = self.data_model.get_output_pressure_range() #Диапазон выходного давления
-        self.tables_data = self.data_model.get_tables_data() # Названия таблиц
+        self.tables_data = self.data_model.get_table_manager() # Названия таблиц
 
     def calculate_tube(self,col_pressure, data, df, col_name,table_name):
         _, z, *_ = self.calculate_propertys_gaz(col_pressure, data["gas_temperature"])
@@ -1194,7 +1203,6 @@ class Max_performance:
         *_,Di_in,Ccp_in = self.calculate_propertys_gaz(col_pressure,float(self.data_model.get_temperature()["in"])) #получаем свойства газа
         # *_, Ccp_out = self.calculate_propertys_gaz(p_out,float(self.data_model.get_temperature()["out"])) #получаем свойства газа
       
-        
         df.at[table_name, col_name] = Calculate_file.heat_balance(
             col_pressure, # Давление на входе
             p_out, # Давление на выходе
@@ -1285,7 +1293,7 @@ class Max_performance:
             raise
 
 class Result:
-    def __init__(self, data_model, max_performance, save_result):
+    def __init__(self, data_model:Data_model, max_performance, save_result):
         self.data_model = data_model
         self.max_performance = max_performance
         self.save_result = save_result
@@ -1367,9 +1375,7 @@ class Save_intermediate_result:
     def __init__(self):
         self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
         
-
     def save(self,df,name_P_out):
-        
         column = df.columns.tolist()
         # Формируем SQL-определение столбцов
         column_definitions = ", ".join([f"{col} REAL" for col in column])
@@ -1382,6 +1388,49 @@ class Save_intermediate_result:
             df.to_sql(name_P_out, conn, if_exists="replace", index=True)
         logger.info(f"Промежуточная таблица {name_P_out=} сохранена в базе данных")
 
+class DataSaverLoader:
+    def __init__(self,data_model:Data_model):
+        self.data_model = data_model
+        self.input_pressure_range = []
+        self.output_pressure_range = []
+        self.gas_composition = {}
+        self.name_table = {}
+        self.temperature = []
+
+    def update_data(self):
+        self.input_pressure_range = self.data_model.get_input_pressure_range()
+        print(self.input_pressure_range)
+
+        self.output_pressure_range = self.data_model.get_output_pressure_range()
+        print(self.output_pressure_range)
+
+        self.gas_composition = self.data_model.get_gas_composition()
+        print(self.gas_composition)
+
+        self.name_table = self.data_model.get_table_manager()
+        print(self.name_table)
+
+        self.temperature = self.data_model.get_temperature()
+        print(self.temperature)
+
+    def save_data(self):
+        self.update_data()
+        with open('data.json', 'w') as outfile:
+            # json.dump(self.input_pressure_range, outfile)
+            # json.dump(self.output_pressure_range, outfile)
+            # json.dump(self.gas_composition, outfile)
+            # json.dumps(self.name_table, outfile)
+            for keys in self.name_table.keys():
+                print(self.name_table[keys].__dict__)
+                print(f"{self.name_table[keys]=}")
+                # print(f"{json.dumps(self.name_table[keys].__dict__)}=")
+
+
+    def load_data(self):
+        pass
+
+
+
 if __name__ == "__main__":
     
     # Настройка логгера
@@ -1391,9 +1440,10 @@ if __name__ == "__main__":
     save_result = Save_intermediate_result()
     root = tk.Tk()
     data_model = Data_model()
+    datasaverloader = DataSaverLoader(data_model)
     fulCalc = Max_performance(data_model,save_result)
     result =Result(data_model,fulCalc,save_result)
-    app = GuiManager(root, data_model,fulCalc,result)
+    app = GuiManager(root, data_model,fulCalc,result,datasaverloader)
     
     root.mainloop()
     
