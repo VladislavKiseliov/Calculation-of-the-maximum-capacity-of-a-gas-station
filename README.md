@@ -1,1 +1,1 @@
-# Calculation-of-the-maximum-capacity-of-a-gas-station
+Программа для расчета максимальной пропускной способности ГРС
