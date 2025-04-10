@@ -14,6 +14,7 @@ from typing import List, Dict, Any,Optional,TypedDict
 import logger_config 
 import matplotlib.pyplot as plt
 import json
+import pickle
 
 class GuiManager:
     def __init__(self, root: tk.Tk, data_model:'Data_model',fulCalc,result,datasaverloader:'DataSaverLoader'):
@@ -1398,33 +1399,34 @@ class DataSaverLoader:
         self.temperature = []
 
     def update_data(self):
+        # Используем деструктуризацию для получения данных
         self.input_pressure_range = self.data_model.get_input_pressure_range()
-        print(self.input_pressure_range)
-
         self.output_pressure_range = self.data_model.get_output_pressure_range()
-        print(self.output_pressure_range)
-
         self.gas_composition = self.data_model.get_gas_composition()
-        print(self.gas_composition)
-
-        self.name_table = self.data_model.get_table_manager()
-        print(self.name_table)
-
         self.temperature = self.data_model.get_temperature()
-        print(self.temperature)
-
+        # Обработка таблиц
+        self.name_table = self.data_model.get_table_manager()
+        self.table_name = {key: manager.get_table_type() for key, manager in self.name_table.items()}
+        
+    def to_dict(self):
+        return {
+            "gas_composition": self.gas_composition,
+            "input_pressure_range": self.input_pressure_range,
+            "output_pressure_range": self.output_pressure_range,
+            "temperature": self.temperature,
+            "table_name": self.table_name
+        }
+    
     def save_data(self):
         self.update_data()
-        with open('data.json', 'w') as outfile:
-            # json.dump(self.input_pressure_range, outfile)
-            # json.dump(self.output_pressure_range, outfile)
-            # json.dump(self.gas_composition, outfile)
-            # json.dumps(self.name_table, outfile)
-            for keys in self.name_table.keys():
-                print(self.name_table[keys].__dict__)
-                print(f"{self.name_table[keys]=}")
-                # print(f"{json.dumps(self.name_table[keys].__dict__)}=")
-
+        data_dict = self.to_dict()
+        file_path = filedialog.asksaveasfilename(
+                title="Сохранить файл",
+                defaultextension=".json",  # Расширение по умолчанию
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]  # Фильтр типов файлов
+            )
+        with open(file_path, 'w',encoding='utf-8') as outfile:
+            json.dump(data_dict, outfile, indent=4, ensure_ascii=False)
 
     def load_data(self):
         pass

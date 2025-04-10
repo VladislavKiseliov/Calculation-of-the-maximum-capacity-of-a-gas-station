@@ -15,3 +15,9 @@ print(f"{serialized_manager=}")
 manager = pickle.loads(serialized_manager)
 print(f"{manager=}")
 print(manager.prin())
+
+dic = {"in":0,"out":2}
+
+
+for i in dic:
+    print(i)
