@@ -14,7 +14,9 @@ from typing import List, Dict, Any,Optional,TypedDict
 import logger_config 
 import matplotlib.pyplot as plt
 import json
-import pickle
+from wigets  import WidgetFactory
+from DataModel import Data_model
+
 
 class GuiManager:
     def __init__(self, root: tk.Tk, data_model:'Data_model',fulCalc,result,datasaverloader:'DataSaverLoader'):
@@ -49,7 +51,14 @@ class GuiManager:
         self.root.option_add("*tearOff", FALSE)
 
         main_menu = Menu()
-        main_menu.add_cascade(label="Файл")
+
+        file_menu = Menu()
+        file_menu.add_command(label="Save",command=self.datasaverloader.save_data)
+        file_menu.add_command(label="Open",command=self.datasaverloader.load_data)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit")
+
+        main_menu.add_cascade(label="Файл",menu=file_menu)
         main_menu.add_cascade(label="Настройка")
         main_menu.add_cascade(label="Справка")
         self.root.config(menu=main_menu)
@@ -97,10 +106,7 @@ class GuiManager:
 
         calculate_button = ttk.Button(self.tabs["Исходные данные"], text="Автоматический расчет", command= self.result.result_table)
         calculate_button.grid(row=7, column=0, padx=5, pady=5) #  Разместите кнопку на сетке
-        datasaverloader
-        save_button = ttk.Button(self.tabs["Исходные данные"], text="Сохранить данные", command= self.datasaverloader.save_data)
-        save_button.grid(row=8, column=0, padx=5, pady=5) #  Разместите кнопку на сетке
-
+        
 class WidgetFactory:  
     @staticmethod
     def create_entry(parent, row, column=1, padx=5, pady=5):
@@ -170,7 +176,7 @@ class GasCompositionManager:
         self.load_gas_composition()
 
         # Кнопка для сохранения данных
-        save_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", self.row_last_components,(lambda : self.data_model.set_gas_composition(self.entries,self.gas_window)))
+        save_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", self.row_last_components,(lambda :setattr(self.data_model, 'data_gas_composition', self.entries)))
     #Кнопка для сохранения в файл
         save_to_file_button = WidgetFactory.create_Button(
             self.gas_window,
@@ -204,7 +210,7 @@ class GasCompositionManager:
     def load_gas_composition(self):
 
         """Loads the gas composition from the data model and updates the entry fields."""
-        saved_composition = self.data_model.get_gas_composition()
+        saved_composition = self.data_model.data_gas_composition
         for component, entry in self.entries.items():
             if component in saved_composition:
                 entry.delete(0, tk.END)
@@ -324,6 +330,16 @@ class TemperatureManager:
             entry = WidgetFactory.create_entry(parent=pressure_window, row=idx)
             self.entries_dict[title] = entry  # Сохраняем Entry по имени
 
+        print(self.entries_dict)
+        
+        temperature = self.data_model.get_temperature()
+        print(f"{temperature=}")
+        if temperature:
+            # min_pressure_entry.insert(0, min(pressure_range))
+
+            self.entries_dict["input"].insert(0,temperature['in'])
+            self.entries_dict["output"].insert(0,temperature['out'])
+            
         save_button = WidgetFactory.create_Button(
             pressure_window,
             label_text="Сохранить",
@@ -394,7 +410,7 @@ class PressureRangeManager:
             entries.append(entry)
 
         min_pressure_entry, max_pressure_entry, average_value_entry = entries
-
+    
         # Загрузка предыдущих значений
         pressure_range = getattr(self.data_model, f"get_{title.lower()}_pressure_range")()
         if pressure_range:
@@ -411,13 +427,42 @@ class PressureRangeManager:
         )
         save_button.grid(row=4, column=0, columnspan=2, pady=10)
 
+    def _calculate_pressure_range(self, min_pressure_entry, max_pressure_entry, average_value_entry)-> List[float]:
+        try:
+            # Проверка на пустые значения
+
+            if not all([min_pressure_entry.strip(), max_pressure_entry.strip(), average_value_entry.strip()]):
+                raise ValueError("Ошибка: Введите значения")
+
+            # Преобразуем входные данные в числа
+            min_pressure = float(min_pressure_entry)
+            max_pressure = float(max_pressure_entry)
+            average_value = float(average_value_entry)
+
+            # Проверка корректности данных
+            if min_pressure > max_pressure:
+                raise ValueError("Ошибка: Минимальное давление больше максимального.")
+            if average_value <= 0:
+                raise ValueError("Ошибка: Шаг должен быть положительным числом.")
+
+            pressure_range = np.arange(min_pressure, max_pressure + average_value, average_value).tolist()
+            return [round(p, 1) for p in pressure_range]
+        
+        except ValueError as e:
+            # Вывод ошибки
+            showwarning("Ошибка", e)
+            return 
+    
     def save_pressure_range(self, title, min_pressure, max_pressure, average_value, window):
         """
         Сохраняет диапазон давлений.
         """
         try:
             pressure_type = title.lower()
-            self.data_model.set_pressure_range(pressure_type,min_pressure, max_pressure, average_value,window)
+            set_pressure_range=self._calculate_pressure_range(min_pressure, max_pressure, average_value)
+
+            self.data_model.set_pressure_range(pressure_type,set_pressure_range)
+            window.destroy()
             logger.info(f"Диапазоны {pressure_type} давления  успешно сохранены: максимальное = %s мПа, минимальное = %s мПа,шаг = %s", max_pressure, min_pressure,average_value)
         except ValueError:
             logger.warning("Введите корректные числовые значения!")
@@ -820,7 +865,7 @@ class GasPropertiesManager:
             self.gaz_text.config(state="disabled")
             return
 
-        gas_composition = self.data_model.get_gas_composition()  # Получаем состав газа
+        gas_composition = self.data_model.data_gas_composition  # Получаем состав газа
         rho_rab, z, plotnost,Di,Ccp = Calculate_file.data_frame(p_in, t_in, gas_composition)
 
         # self.data_model.set_gas_properties([rho_rab, z, plotnost,Di,Ccp])
@@ -881,7 +926,7 @@ class TubePropertiesManager:
                 input_values[name] = value
 
             # Получаем состав газа
-            gas_composition = self.data_model.get_gas_composition()
+            gas_composition = self.data_model.data_gas_composition
 
             # Выполняем расчеты
             rho_rab, z, plotnost, Di, Ccp = Calculate_file.data_frame(
@@ -916,150 +961,7 @@ class TubePropertiesManager:
             self.tube_text.insert(tk.END, f"Плотность газа: {plotnost:.4f}\n")
 
         self.tube_text.config(state="disabled")
-
-class Data_model:
-    """Stores and manages application data.
-    This class provides a centralized location for storing and retrieving
-    various data used in the application, such as gas composition,
-    pressure ranges, table data, and gas properties.
-    """
-    def __init__(self):
-        self.gas_composition = {}
-        self.input_pressure_range = []
-        self.output_pressure_range = None
-        self.tables_data = {}
-        self.gas_properties = {}
-        self.temperature = {}
-        self.db_path = "tables.db"
-
-    def get_gas_composition(self)-> Dict[str,float] :
-        return self.gas_composition
-
-    def set_gas_composition(self, composition: Dict[str,ttk.Entry], gas_window):
-        # Сохраняем введенные данные
-        total_percentage = 0.0
-        self.gas_composition = {} #Очищаем словарь, что бы не накладывало значения
-        for component, entry in composition.items():
-            try:
-                percentage = float(entry.get())
-                if percentage < 0:
-                    raise ValueError("Отрицательное значение")
-                self.gas_composition[component] = percentage
-                total_percentage += percentage
-            except ValueError:
-                self.gas_composition[component] = 0.0  # Если введено неверное значение, считаем 0%
-
-        # Проверяем, что сумма процентов равна 100%
-        if abs(total_percentage - 100.0) > 0.001:  # Допускаем небольшую погрешность
-            print(f"{abs(total_percentage - 100.0)=}")
-            logger.error("Ошибка", f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%")
-            showwarning("Ошибка", f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%")
-            return 
-
-        else:
-            showinfo("Успех", "Данные успешно сохранены!")
-            logger.info("Состав газа сохранен")
-            print(self.gas_composition)
-        gas_window.destroy()
-        
-    def set_gas_composition_from_file(self, loaded_composition):
-        """
-        Sets the gas composition from a loaded dictionary.
-
-        Args:
-            loaded_composition (dict): The dictionary of loaded gas composition data.
-        """
-        self.gas_composition = loaded_composition
-        logger.info(f"Состав газа установлен из файла: {self.gas_composition}")
-        print(f"Состав газа установлен из файла: {self.gas_composition}")    
-    
-    def get_input_pressure_range(self)-> List[float]:
-        return self.input_pressure_range
-
-    def get_output_pressure_range(self)-> List[float]:
-        return self.output_pressure_range
-
-    def _calculate_pressure_range(self, min_pressure_entry, max_pressure_entry, average_value_entry)-> List[float]:
-        try:
-            # Проверка на пустые значения
-
-            if not all([min_pressure_entry.strip(), max_pressure_entry.strip(), average_value_entry.strip()]):
-                raise ValueError("Ошибка: Введите значения")
-
-            # Преобразуем входные данные в числа
-            min_pressure = float(min_pressure_entry)
-            max_pressure = float(max_pressure_entry)
-            average_value = float(average_value_entry)
-
-            # Проверка корректности данных
-            if min_pressure > max_pressure:
-                raise ValueError("Ошибка: Минимальное давление больше максимального.")
-            if average_value <= 0:
-                raise ValueError("Ошибка: Шаг должен быть положительным числом.")
-
-            pressure_range = np.arange(min_pressure, max_pressure + average_value, average_value).tolist()
-            return [round(p, 1) for p in pressure_range]
-        
-        except ValueError as e:
-            # Вывод ошибки
-            showwarning("Ошибка", e)
-            return 
-
-    def set_pressure_range(self, pressure_type, min_pressure_entry, max_pressure_entry, average_value_entry,window):
-        """
-        Устанавливает диапазон давлений (входного или выходного).
-        :param pressure_type: "input" для входного давления, "output" для выходного.
-        """
-        try:
-            pressure_range = self._calculate_pressure_range(min_pressure_entry, max_pressure_entry, average_value_entry)
-        # Если диапазон не сгенерирован (ошибка), прерываем выполнение
-            if pressure_range is None:
-                logger.error(f"Диапазон {pressure_type} давлений не был сгенерирован")
-                return  # Не закрываем окно и не выводим сообщение
-            
-            # Если всё успешно
-            setattr(self, f"{pressure_type}_pressure_range", pressure_range)
-            logger.info(f"Данные диапазона {pressure_type} давления сохранены")
-
-            print(getattr(self, f"{pressure_type}_pressure_range"))
-            showinfo("Успех", "Данные успешно сохранены!")
-            window.destroy()  # Закрываем окно
-
-        except Exception as e:
-            logger.error(f"Не удалось сохранить данные: {e}")
-            showwarning("Ошибка", f"Не удалось сохранить данные: {e}")
-
-    def get_table_manager(self)->List[Dict[str, Any]]:
-        """Возвращаем название и тип таблиц"""
-        return self.tables_data
-
-    def get_data_table(self,name_table) -> List[Dict[str, Any]]: 
-        """Получение данных из базы данных."""
-        with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql_query(f"SELECT * FROM {name_table}", conn)
-            # print(f"{df.to_dict(orient="records")[0]=}")
-            logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
-        return df.to_dict(orient="records")[0]  # Список словарей
-
-    def set_tables_data(self, tables: Dict[str,Any]):
-        self.tables_data = tables
-        print(self.tables_data)
-        logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")
-    
-    def get_gas_properties(self):
-        return self.gas_properties
-
-    def set_gas_properties(self, gas_properties):
-        self.gas_properties = gas_properties
-        logger.info(f"Данные свойств газа {self.gas_properties} сохранены в Data_model")
-
-    def set_temperature(self,temp_in: float,temp_out:float):
-        self.temperature = {"in":temp_in,"out":temp_out}
-        logger.info(f"Данные температуры газа {self.temperature} сохранены в Data_model")
-
-    def get_temperature(self)-> Dict[str,float]:
-        return self.temperature
-    
+ 
 class RegulatorManager:
     def __init__(self, parent,data_model):
         self.parent = parent
@@ -1089,7 +991,7 @@ class RegulatorManager:
             for name, entry in self.entries.items():
                 value = float(entry.get())
                 input_values[name] = value
-            gas_composition = self.data_model.get_gas_composition()  # Получаем состав газа
+            gas_composition = self.data_model.data_gas_composition  # Получаем состав газа
             rho_rab, z, plotnost,Di,Ccp = Calculate_file.data_frame(input_values["Давление вход, МПа"], input_values["Температура, ℃"], gas_composition)
             q = Calculate_file.calculate_Ky(input_values["Давление вход, МПа"],
                                input_values["Давление выход, МПа"],
@@ -1141,7 +1043,7 @@ class HeatBalanceManager:
             for name, entry in self.entries.items():
                 value = float(entry.get())
                 input_values[name] = value
-            gas_composition = self.data_model.get_gas_composition()  # Получаем состав газа
+            gas_composition = self.data_model.data_gas_composition  # Получаем состав газа
             rho_rab_in, z_in, plotnost_in,Di_in,Cc_in = Calculate_file.data_frame(input_values["Давление вход, МПа"], input_values["Температура вход, ℃"], gas_composition)
             # rho_rab_out, z_out, plotnost_out,Di_out,Ccp_out = Calculate_file.data_frame(input_values["Давление выход, МПа"], input_values["Температура выход, ℃"], gas_composition)
             q,T = Calculate_file.heat_balance(input_values["Давление вход, МПа"],
@@ -1216,7 +1118,7 @@ class Max_performance:
             )
 
     def calculate_propertys_gaz(self,gas_pressure_mpa,gas_temperature_c):
-        gas_composition = self.data_model.get_gas_composition() # Получаем состав газа
+        gas_composition = self.data_model.data_gas_composition # Получаем состав газа
         rho_rab, z, plotnost,Di,Ccp = Calculate_file.data_frame(gas_pressure_mpa, gas_temperature_c, gas_composition)
         return  rho_rab, z, plotnost,Di,Ccp
     
@@ -1402,7 +1304,7 @@ class DataSaverLoader:
         # Используем деструктуризацию для получения данных
         self.input_pressure_range = self.data_model.get_input_pressure_range()
         self.output_pressure_range = self.data_model.get_output_pressure_range()
-        self.gas_composition = self.data_model.get_gas_composition()
+        self.gas_composition = self.data_model.data_gas_composition
         self.temperature = self.data_model.get_temperature()
         # Обработка таблиц
         self.name_table = self.data_model.get_table_manager()
@@ -1418,10 +1320,13 @@ class DataSaverLoader:
         }
     
     def save_data(self):
+        saves_dir = "Saves"
+        os.makedirs(saves_dir, exist_ok=True)  # Создаем директорию, если её нет
         self.update_data()
         data_dict = self.to_dict()
         file_path = filedialog.asksaveasfilename(
                 title="Сохранить файл",
+                initialdir = saves_dir,
                 defaultextension=".json",  # Расширение по умолчанию
                 filetypes=[("JSON files", "*.json"), ("All files", "*.*")]  # Фильтр типов файлов
             )
@@ -1429,6 +1334,29 @@ class DataSaverLoader:
             json.dump(data_dict, outfile, indent=4, ensure_ascii=False)
 
     def load_data(self):
+        file_path = filedialog.askopenfilename(
+                title="Выберите файл для загрузки состава газа",
+                defaultextension=".json",  # Расширение по умолчанию
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]  # Фильтр типов файлов
+            )
+        with open(file_path, 'r',encoding='utf-8') as outfile:
+            data = json.load( outfile)
+            # print(data["gas_composition"])
+            print(data["input_pressure_range"])
+            # print(data["output_pressure_range"])
+            # # print(data["temperature"]["in"])
+            # print(data["table_name"])
+
+        # self.data_model.set_temperature(data["temperature"]["in"],data["temperature"]["out"])
+        # self.data_model.data_gas_composition = data["gas_composition"]
+        # print(f"{self.data_model.data_gas_composition=}")
+    
+        
+        self.data_model.set_pressure_range("input",data["input_pressure_range"])
+        self.data_model.set_pressure_range("output",data["output_pressure_range"])
+        print(f"{self.data_model.get_input_pressure_range()=}")
+        print(f"{self.data_model.get_output_pressure_range()=}")
+        # print(f"{self.data_model.get_temperature()=}")
         pass
 
 
@@ -1441,7 +1369,7 @@ if __name__ == "__main__":
     
     save_result = Save_intermediate_result()
     root = tk.Tk()
-    data_model = Data_model()
+    data_model = Data_model(logger)
     datasaverloader = DataSaverLoader(data_model)
     fulCalc = Max_performance(data_model,save_result)
     result =Result(data_model,fulCalc,save_result)
