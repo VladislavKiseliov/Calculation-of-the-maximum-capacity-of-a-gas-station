@@ -21,6 +21,7 @@ class Data_model:
         self.gas_properties = {}
         self.temperature = {}
         self.db_path = "tables.db"
+    
     @property
     def data_gas_composition(self)-> Dict[str,float] :
         return self.gas_composition
@@ -51,8 +52,7 @@ class Data_model:
             showinfo("Успех", "Данные успешно сохранены!")
             self.logger.info("Состав газа сохранен")
             print(self.gas_composition)
-        
-        
+           
     def set_gas_composition_from_file(self, loaded_composition):
         """
         Sets the gas composition from a loaded dictionary.

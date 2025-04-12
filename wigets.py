@@ -2,7 +2,7 @@ import tkinter as ttk
 
 class WidgetFactory:  
     @staticmethod
-    def create_entry(parent, row, column=1, padx=5, pady=5):
+    def create_entry(parent, row,column=1, padx=5, pady=5):
         entry = ttk.Entry(parent)
         entry.grid(row=row, column=column, padx=padx, pady=pady)
         return entry

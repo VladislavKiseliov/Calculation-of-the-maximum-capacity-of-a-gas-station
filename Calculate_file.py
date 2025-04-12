@@ -40,7 +40,6 @@ def heat_balance(P_in,P_out,T_in,T_out,Boiler_capacity,Di,Ccp,typeCalculate = Fa
     else:
         return Q,T_heat_exchanger
     
-
 def calc( pipe_diameter_mm, pipe_wall_thickness_mm, gas_pressure_mpa, gas_temperature_c,
              gas_flow_velocity_m_s, number_of_lines,compressibility_factor):
         # Расчет внутреннего диаметра
@@ -68,7 +67,6 @@ def calc( pipe_diameter_mm, pipe_wall_thickness_mm, gas_pressure_mpa, gas_temper
             )
         )
         return Q
-
 
 def data_frame(P_in,t_in,gas_compositio):
     # Загрузка данных
