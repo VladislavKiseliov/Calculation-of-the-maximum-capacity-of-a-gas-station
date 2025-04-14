@@ -1,9 +1,11 @@
+import os
+from tkinter import filedialog
 from typing import List, Dict, Any,Optional,TypedDict
 import sqlite3
 import numpy as np
 import pandas as pd
 import tkinter as ttk
-
+import csv
 from tkinter.messagebox import showwarning, showinfo
 
 class Data_model:
@@ -117,7 +119,6 @@ class Data_model:
         self.gas_properties = gas_properties
         self.logger.info(f"Данные свойств газа {self.gas_properties} сохранены в Data_model")
 
-    
     @property
     def temperature(self)-> Dict[str,float]:
         return self._temperature
@@ -127,3 +128,79 @@ class Data_model:
         print(temp)
         self._temperature = {"in":temp[0],"out":temp[1]}
         self.logger.info(f"Данные температуры газа {self._temperature} сохранены в Data_model")
+
+    def save_gas_composition_to_csv(self):
+        """Saves the current gas composition to a CSV file."""
+        try:
+            # Открываем проводник для выбора пути и имени файла
+            file_path = filedialog.asksaveasfilename(
+                title="Сохранить состав газа как",
+                defaultextension=".csv",  # Расширение по умолчанию
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]  # Фильтр типов файлов
+            )
+
+            if not file_path:  # Если пользователь отменил выбор
+                self.logger.warning("Отмена.Сохранение отменено пользователем")
+                showwarning("Отмена", "Сохранение отменено пользователем")
+                return
+
+            # Сохраняем данные в выбранный файл
+            with open(file_path, mode='w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["Component", "Percentage"])  # Заголовок таблицы
+
+                for component, percentage in self.gas_composition.items():
+                        writer.writerow([component, percentage])
+          
+            # Уведомляем пользователя об успешном сохранении
+            self.logger.info(f"Состав газа сохранен в файл: {file_path}")
+            showinfo("Успех", f"Состав газа сохранен в файл: {file_path}")
+        except Exception as e:
+            self.logger.error("Ошибка", f"Не удалось сохранить в файл: {e}")
+            # Обрабатываем ошибки при сохранении
+            showwarning("Ошибка", f"Не удалось сохранить в файл: {e}")
+
+    def load_gas_composition_from_csv(self):
+        """Loads the gas composition from a CSV file and updates the entry fields."""
+
+        try:
+            # Открываем проводник для выбора файла
+            file_path = filedialog.askopenfilename(
+                title="Выберите файл для загрузки состава газа",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]  # Фильтр типов файлов
+            )
+
+            if not file_path:  # Если пользователь отменил выбор
+                showwarning("Отмена", "Загрузка отменена пользователем")
+                self.logger.warning("Отмена", "Загрузка отменена пользователем")
+                return
+
+            # Проверяем существование файла
+            if not os.path.exists(file_path):
+                showwarning("Ошибка", f"Файл {file_path} не найден.")
+                self.logger.error("Ошибка", f"Файл {file_path} не найден.")
+                return
+
+            # Загружаем данные из выбранного файла
+            with open(file_path, mode='r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                loaded_composition = {}
+                for row in reader:
+                    try:
+                        loaded_composition[row["Component"]] = float(row["Percentage"])
+                    except ValueError:
+                        loaded_composition[row["Component"]] = 0.0  # Если значение некорректно, записываем 0.0
+                        self.logger.warning(f"{loaded_composition[row["Component"]]} = 0.0")
+
+                # Устанавливаем состав газа в модели и обновляем поля ввода
+                self.data_model.set_gas_composition_from_file(loaded_composition)
+                self.load_gas_composition()  # Обновляем поля ввода
+
+            # Уведомляем пользователя об успешной загрузке
+            showinfo("Успех", f"Состав газа загружен из файла: {file_path}")
+            self.logger.info(f"Состав газа загружен из файла: {file_path}")
+
+        except Exception as e:
+            # Обрабатываем ошибки при загрузке
+            self.logger.error("Ошибка", f"Не удалось загрузить из файла: {e}")
+            showwarning("Ошибка", f"Не удалось загрузить из файла: {e}")

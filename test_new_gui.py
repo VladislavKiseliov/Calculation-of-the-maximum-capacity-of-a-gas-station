@@ -165,11 +165,14 @@ class Initial_data:
         self.row_last_components = math.ceil((len(self.components)/2)+1)
 
         # Кнопка для сохранения данных
-        self.save_gaz_sostav_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", self.row_last_components)
+        self.save_gaz_sostav_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", 
+                                                                  self.row_last_components,function=lambda: self.callbacks.get("save_sostav_gaz")())
         #Кнопка для сохранения в файл
-        self.save_to_file_button = WidgetFactory.create_Button(parent=self.gas_window,label_text="Сохранить в файл",row = self.row_last_components+1)
+        self.save_to_file_button = WidgetFactory.create_Button(parent=self.gas_window,label_text="Сохранить в файл",
+                                                               row = self.row_last_components+1,function=lambda: self.callbacks.get("save_gas_composition_to_csv")())
          #Кнопка для открытия из файла
-        self.load_from_file_button = WidgetFactory.create_Button(self.gas_window,"Открыть из файла",self.row_last_components+2)
+        self.load_from_file_button = WidgetFactory.create_Button(self.gas_window,"Открыть из файла",
+                                                                 self.row_last_components+2,function=lambda: self.callbacks.get("load_gas_composition_to_csv")())
 
     def update_total_percentage(self, event=None):
         """
@@ -227,14 +230,11 @@ class Initial_data:
         for i, label_text in enumerate(labels):
             ttk.Label(pressure_window, text=label_text).grid(row=i, column=0, padx=5, pady=5)
             entry = WidgetFactory.create_entry(pressure_window, row=i, column=1)
-            # self.pressure_entries.append(entry)
             self.pressure_entries[labels[i]] = entry
         print(self.pressure_entries)  
 
-        self.save_button = ttk.Button(
-            pressure_window, text="Сохранить",)
-        self.save_button.grid(row=4, column=0, columnspan=2, pady=10)    
-    
+        self.save_button = WidgetFactory.create_Button(parent=pressure_window,label_text="Сохранить",row=4,function=lambda: self.callbacks.get("save_pressure_range")())
+   
     def create_window_table(self):
         self.tables = {}  # Хранит все таблицы: {"table_name": manager}
         self.table_labels = [
@@ -282,9 +282,11 @@ class controller:
             self.initial_data.register_callback(
                 f"{pressure_type}_pressure",
                 lambda pt=pressure_type: self.setup_button_pressure(pt)
-            )
+            )# Колбек на открытия меню входного и выходного давления
+        self.initial_data.register_callback("save_gas_composition_to_csv",self.save_sostav_csv)
+        self.initial_data.register_callback("load_gas_composition_to_csv",self.model.load_gaz_from_csv)
+        self.initial_data.register_callback("save_sostav_gaz",lambda : self.model.save_sostav_gaz(self.initial_data.entries))
         
-
     def setup_button_pressure(self,title): # Функция для создание диапазона входных и выходных давлений
         self.initial_data.create_window_pressure(title) #Создаем окно
         # # Загрузка предыдущих значений
@@ -293,16 +295,20 @@ class controller:
             self.initial_data.pressure_entries["Максимальное давление:"].insert(0, max(pressure_range))
             self.initial_data.pressure_entries["Шаг значения"].insert(0, pressure_range[1] - pressure_range[0])
 
-        self.initial_data.save_button.configure(command=lambda: self.model.save_pressure_range1(   
+        self.initial_data.register_callback("save_pressure_range", lambda: self.model.save_pressure_range1(   
                 self.initial_data.title,  # Передаем title
                 self.initial_data.pressure_entries  # Передаем поля для ввода
-            )) #Привязывае функцию кнопкам сохранения
-
+            ))# Привязываю функцию для сохранение диапазона давлениея
+        
     def gaz_window(self):
         self.initial_data.create_window_sostav_gaz()
         self.model.load_gas_composition(self.initial_data.entries)
         self.initial_data.update_total_percentage()
-        self.initial_data.save_gaz_sostav_button.configure(command=lambda : self.model.save_sostav_gaz(self.initial_data.entries))
+    
+    def save_sostav_csv(self):
+        self.model.save_sostav_gaz(self.initial_data.entries)
+        self.model.save_gaz_from_csv()
+
         
     
 
@@ -362,6 +368,12 @@ class Model:
     def save_sostav_gaz(self,entries):
         self.data_model.data_gas_composition = entries   
 
+    def save_gaz_from_csv(self):
+
+        self.data_model.save_gas_composition_to_csv()
+    
+    def load_gaz_from_csv(self):
+        self.data_model.load_gas_composition_from_csv()
 
 
 
