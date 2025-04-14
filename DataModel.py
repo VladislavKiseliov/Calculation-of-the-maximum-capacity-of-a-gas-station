@@ -19,7 +19,7 @@ class Data_model:
         self.output_pressure_range = None
         self.tables_data = {}
         self.gas_properties = {}
-        self.temperature = {}
+        self._temperature = {}
         self.db_path = "tables.db"
     
     @property
@@ -117,10 +117,13 @@ class Data_model:
         self.gas_properties = gas_properties
         self.logger.info(f"Данные свойств газа {self.gas_properties} сохранены в Data_model")
 
-    def set_temperature(self,temp_in: float,temp_out:float):
-        self.temperature = {"in":temp_in,"out":temp_out}
-        self.logger.info(f"Данные температуры газа {self.temperature} сохранены в Data_model")
-
-    def get_temperature(self)-> Dict[str,float]:
-        return self.temperature
     
+    @property
+    def temperature(self)-> Dict[str,float]:
+        return self._temperature
+    
+    @temperature.setter
+    def temperature(self,temp):
+        print(temp)
+        self._temperature = {"in":temp[0],"out":temp[1]}
+        self.logger.info(f"Данные температуры газа {self._temperature} сохранены в Data_model")

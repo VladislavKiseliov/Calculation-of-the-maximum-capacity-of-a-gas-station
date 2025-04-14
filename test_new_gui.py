@@ -1,9 +1,21 @@
-import math
-import tkinter as ttk
+import contextlib
+from abc import ABC,abstractmethod
 import tkinter as tk
 from tkinter import FALSE, Menu, ttk,filedialog
-from wigets  import WidgetFactory
+import math
+from tkinter import messagebox
+from tkinter.messagebox import showwarning, showinfo
 import Calculate_file
+import numpy as np
+import pandas as pd
+import os  # Import the 'os' module
+import csv
+import sqlite3
+from typing import List, Dict, Any,Optional,TypedDict
+import logger_config
+import matplotlib.pyplot as plt
+import json
+from wigets  import WidgetFactory
 from DataModel import Data_model
 
 class WidgetFactory:  
@@ -107,15 +119,15 @@ class Initial_data:
         self.parent = parent
         # self.data_model=data_model
         self.create_wigets()
-        self.entries = {}
-        pass
+        self.entries = {} #Словарь хранения данных
+        self.callbacks = {}  # Хранилище для колбэков
     
     def create_wigets(self):
-        self.gas_button = WidgetFactory.create_Button(self.parent,label_text="Ввести состав газа", row=1) 
-        self.button_temp = WidgetFactory.create_Button(parent=self.parent,label_text="Температура газа",row=2)
-        self.input_pressure = WidgetFactory.create_Button(parent=self.parent, label_text="Диапазон входных давлений",row=3)
-        self.output_pressure = WidgetFactory.create_Button(parent=self.parent, label_text="Диапазон выходных давлений",row=4)
-        self.input_table_button = WidgetFactory.create_Button(parent=self.parent,label_text="Исходные таблицы",row=5)
+        self.gas_button = WidgetFactory.create_Button(self.parent,label_text="Ввести состав газа", row=1,function=lambda: self.callbacks.get("save_gas_composition")()) 
+        self.button_temp = WidgetFactory.create_Button(parent=self.parent,label_text="Температура газа",row=2,function=self.create_window_temperature)
+        self.input_pressure = WidgetFactory.create_Button(parent=self.parent, label_text="Диапазон входных давлений",row=3,function=lambda: self.callbacks.get("input_pressure")())
+        self.output_pressure = WidgetFactory.create_Button(parent=self.parent, label_text="Диапазон выходных давлений",row=4,function=lambda: self.callbacks.get("output_pressure")())
+        self.input_table_button = WidgetFactory.create_Button(parent=self.parent,label_text="Исходные таблицы",row=5,function=self.create_window_table)
         self.calculate_button = WidgetFactory.create_Button(self.parent, label_text="Автоматический расчет",row=6)
         self.calculate_button.config(state="disabled")
  
@@ -151,7 +163,6 @@ class Initial_data:
         # Load previously saved composition, if available
 
         self.row_last_components = math.ceil((len(self.components)/2)+1)
-        # self.load_gas_composition()
 
         # Кнопка для сохранения данных
         self.save_gaz_sostav_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", self.row_last_components)
@@ -166,75 +177,194 @@ class Initial_data:
         """
         total = 0.0
         for component, entry in self.entries.items():
-            try:
+            with contextlib.suppress(ValueError):
                 value = float(entry.get())
                 total += value
-            except ValueError:
-                pass  # Если значение некорректно, игнорируем его
-
         # Обновляем метку с суммой
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
+    def create_window_temperature(self):
+        """Открывает диалог для ввода температур."""
+        self.entries_dict = {}
+        pressure_window = tk.Toplevel(self.parent)
+        pressure_window.attributes('-topmost', True)
+        pressure_window.title("Температурный режим")
+
+        for idx, (title, label_text) in enumerate([
+            ("input", "Температура на входе"),
+            ("output", "Температура на выходе")
+        ]):
+            WidgetFactory.create_label(parent=pressure_window, label_text=label_text, row=idx)
+            entry = WidgetFactory.create_entry(parent=pressure_window, row=idx)
+            self.entries_dict[title] = entry  # Сохраняем Entry по имени
+
+        print(self.entries_dict)
+        
+        # # temperature = self.data_model.get_temperature()
+        # print(f"{temperature=}")
+        # if temperature:
+        #     # min_pressure_entry.insert(0, min(pressure_range))
+
+        #     self.entries_dict["input"].insert(0,temperature['in'])
+        #     self.entries_dict["output"].insert(0,temperature['out'])
+            
+        self.save_button = WidgetFactory.create_Button(
+            pressure_window,
+            label_text="Сохранить",
+            row=3)
+
+    def create_window_pressure(self,title):
+        """
+        Открывает диалоговое окно для ввода диапазона давлений.
+        """
+        self.title =title
+        pressure_window = tk.Toplevel(self.parent)
+        pressure_window.title(self.title)
+
+        labels = ["Минимальное давление:", "Максимальное давление:", "Шаг значения"]
+        self.pressure_entries = {}
+
+        for i, label_text in enumerate(labels):
+            ttk.Label(pressure_window, text=label_text).grid(row=i, column=0, padx=5, pady=5)
+            entry = WidgetFactory.create_entry(pressure_window, row=i, column=1)
+            # self.pressure_entries.append(entry)
+            self.pressure_entries[labels[i]] = entry
+        print(self.pressure_entries)  
+
+        self.save_button = ttk.Button(
+            pressure_window, text="Сохранить",)
+        self.save_button.grid(row=4, column=0, columnspan=2, pady=10)    
+    
+    def create_window_table(self):
+        self.tables = {}  # Хранит все таблицы: {"table_name": manager}
+        self.table_labels = [
+            "Таблица для регуляторов",
+            "Таблица котельной",
+            "Таблицы для труб до регулятора",
+            "Таблицы для труб после регулятора"
+        ]
+        self.table_window = tk.Toplevel(self.parent)
+        self.table_window.title("Таблицы граничных условий")
+
+        # Метка для выбора таблицы
+        label = WidgetFactory.create_label(self.table_window, "Выберите таблицу:", 0)
+
+        # Combobox
+        self.combobox = ttk.Combobox(
+            self.table_window,
+            values=self.table_labels,
+            state="readonly",
+            width=33
+        )
+        self.combobox.grid(row=1, column=0, padx=5, pady=5)
+
+        # Кнопка добавления таблицы
+        save_button = WidgetFactory.create_Button(
+            self.table_window,
+            "Добавить таблицу",
+            2,
+        )
+
+    def register_callback(self, event_name, callback):
+        """
+        Регистрирует колбэк для определённого события.
+        """
+        self.callbacks[event_name] = callback
+
 class controller:
-    def __init__(self,initial_data:Initial_data,model:'Model',data_model:'Data_model'):
+    def __init__(self,initial_data:Initial_data,model:'Model'):
         self.initial_data = initial_data
         self.model = model
-        self.data_model = data_model
-        self.setup_buttom()
 
+        #Регистрируем колбеки
+        self.initial_data.register_callback("save_gas_composition", self.gaz_window)# "Сохранить состав газа"
+        for pressure_type in ["input", "output"]:
+            self.initial_data.register_callback(
+                f"{pressure_type}_pressure",
+                lambda pt=pressure_type: self.setup_button_pressure(pt)
+            )
+        
 
-    def setup_buttom(self):
-        self.initial_data.gas_button.configure(command = self.work_sostav_gaz)
-        self.initial_data.save_gaz_sostav_button.configure(command = self.work_sostav_gaz)
+    def setup_button_pressure(self,title): # Функция для создание диапазона входных и выходных давлений
+        self.initial_data.create_window_pressure(title) #Создаем окно
+        # # Загрузка предыдущих значений
+        if pressure_range := getattr(self.model.data_model, f"get_{title.lower()}_pressure_range")():
+            self.initial_data.pressure_entries["Минимальное давление:"].insert(0, min(pressure_range))
+            self.initial_data.pressure_entries["Максимальное давление:"].insert(0, max(pressure_range))
+            self.initial_data.pressure_entries["Шаг значения"].insert(0, pressure_range[1] - pressure_range[0])
 
+        self.initial_data.save_button.configure(command=lambda: self.model.save_pressure_range1(   
+                self.initial_data.title,  # Передаем title
+                self.initial_data.pressure_entries  # Передаем поля для ввода
+            )) #Привязывае функцию кнопкам сохранения
 
-    def update_state_button(self):
-        """
-        Проверяем введены ли исходные данные для автоматического расчета
-        """
-        input_pressure = self.data_model.get_input_pressure_range()
-        output_pressure = self.data_model.get_output_pressure_range()
-        table = self.data_model.get_data_table()
-        temp = self.data_model.get_temperature()
-        if (input_pressure and output_pressure and table and temp["in"] and temp["out"] is None):
-            pass
-        pass
-
-    def work_sostav_gaz(self):
+    def gaz_window(self):
         self.initial_data.create_window_sostav_gaz()
-        print("Работает")
-
-
-
-class Model:
-    def __init__(self,calc_gaz):
-        self.calc_gaz=calc_gaz
-        pass
-
-    def work_gas(self,entries):
-        self.calc_gaz.update_total_percentage(entries)
-
-
-
-class Calculate_gaz:
-    def __init__(self):
-        pass
+        self.model.load_gas_composition(self.initial_data.entries)
+        self.initial_data.update_total_percentage()
+        self.initial_data.save_gaz_sostav_button.configure(command=lambda : self.model.save_sostav_gaz(self.initial_data.entries))
+        
     
 
-    def load_gas_composition(self):
+class Model:
+    def __init__(self, data_model: Data_model):
+        self.data_model = data_model
 
+    def _calculate_pressure_range(self, min_pressure, max_pressure, average_value) -> List[float]:
+        try:
+
+            # Проверка корректности данных
+            if min_pressure > max_pressure:
+                raise ValueError("Ошибка: Минимальное давление больше максимального.")
+            if average_value <= 0:
+                raise ValueError("Ошибка: Шаг должен быть положительным числом.")
+
+            pressure_range = np.arange(min_pressure, max_pressure + average_value, average_value).tolist()
+            return [round(p, 1) for p in pressure_range]
+        
+        except ValueError as e:
+            # Вывод ошибки
+            showwarning("Ошибка", e)
+            return 
+    
+    def save_pressure_range1(self, title: str, pressure_entries: Dict[str,ttk.Entry]):
+        """
+        Сохраняет диапазон давлений.
+        """
+        # Преобразуем входные данные в числа
+        min_pressure = float(pressure_entries["Минимальное давление:"].get())
+        max_pressure= float(pressure_entries["Максимальное давление:"].get())
+        avg_value= float(pressure_entries["Шаг значения"].get())
+        
+        if not all([min_pressure, max_pressure, avg_value]):
+                        raise ValueError("Ошибка: Введите значения")
+
+        try:
+            pressure_type = title.lower()
+            set_pressure_range=self._calculate_pressure_range(min_pressure, max_pressure, avg_value)
+
+            print(f"{set_pressure_range=}")
+            self.data_model.set_pressure_range(pressure_type,set_pressure_range)
+
+            logger.info(f"Диапазоны {pressure_type} давления  успешно сохранены: максимальное = %s мПа, минимальное = %s мПа,шаг = %s", max_pressure, min_pressure,avg_value)
+        except ValueError:
+            logger.warning("Введите корректные числовые значения!")
+            showwarning("Ошибка", "Введите корректные числовые значения!")
+
+    def load_gas_composition(self,entries):
         """Loads the gas composition from the data model and updates the entry fields."""
         saved_composition = self.data_model.data_gas_composition
-        for component, entry in self.entries.items():
+        for component, entry in entries.items():
             if component in saved_composition:
                 entry.delete(0, tk.END)
                 entry.insert(0, str(saved_composition[component]))
-         # Обновляем сумму после загрузки данных
-        self.update_total_percentage()
+
+    def save_sostav_gaz(self,entries):
+        self.data_model.data_gas_composition = entries   
 
 
-calc_gaz=Calculate_gaz()
-model = Model(calc_gaz)
+
+
 
 
 
@@ -498,9 +628,14 @@ class Calculation_pipi:
 
 
 if __name__ == "__main__":
-    
- 
+    filename =logger_config.create_log_file() 
+    logger = logger_config.setup_logger(filename)
+    data_model = Data_model(logger)
+
+    model = Model(data_model)
     root = tk.Tk()
     app = GuiManager(root)
     
+    
+
     root.mainloop()

@@ -1,3 +1,4 @@
+import contextlib
 from abc import ABC,abstractmethod
 import tkinter as tk
 from tkinter import FALSE, Menu, ttk,filedialog
@@ -11,7 +12,7 @@ import os  # Import the 'os' module
 import csv
 import sqlite3
 from typing import List, Dict, Any,Optional,TypedDict
-import logger_config 
+import logger_config
 import matplotlib.pyplot as plt
 import json
 from wigets  import WidgetFactory
@@ -179,12 +180,9 @@ class GasCompositionManager:
         """
         total = 0.0
         for component, entry in self.entries.items():
-            try:
+            with contextlib.suppress(ValueError):
                 value = float(entry.get())
                 total += value
-            except ValueError:
-                pass  # Если значение некорректно, игнорируем его
-
         # Обновляем метку с суммой
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
@@ -313,8 +311,8 @@ class TemperatureManager:
 
         print(self.entries_dict)
         
-        temperature = self.data_model.get_temperature()
-        print(f"{temperature=}")
+        temperature = self.data_model.temperature
+        # print(f"{temperature=}")
         if temperature:
             # min_pressure_entry.insert(0, min(pressure_range))
 
@@ -345,9 +343,9 @@ class TemperatureManager:
             # Проверка на отрицательные значения (пример)
             if input_temp < -273.15 or output_temp < -273.15:
                 raise ValueError("Температура не может быть ниже абсолютного нуля (-273.15°C)")
-
             # Сохранение данных
-            self.data_model.set_temperature(input_temp, output_temp)
+            self.data_model.temperature = [input_temp, output_temp]
+
             logger.info("Температуры успешно сохранены: вход = %s°C, выход = %s°C", input_temp, output_temp)
             showinfo("Успех", "Данные успешно сохранены!")
             pressure_window.destroy()
@@ -1069,29 +1067,29 @@ class Max_performance:
                  
 
     def calculate_regulator(self,col_pressure, p_out, data, df, col_name,table_name):
-        *_,plotnost,Di_in,_= self.calculate_propertys_gaz(col_pressure, float(self.data_model.get_temperature()["in"]))
+        *_,plotnost,Di_in,_= self.calculate_propertys_gaz(col_pressure, float(self.data_model.temperature["in"]))
         df.at[table_name, col_name] = float(Calculate_file.calculate_Ky(
                 col_pressure,
                 p_out,
-                float(self.data_model.get_temperature()["in"]),
+                float(self.data_model.temperature["in"]),
                 plotnost,
                 data["kv"],
                 data["lines_count"],
                 True,
-                float(self.data_model.get_temperature()["out"]),
+                float(self.data_model.temperature["out"]),
                 Di_in
                 ))
 
     def calculate_heat_balance(self,col_pressure, p_out, data, df, col_name,table_name):
         
-        *_,Di_in,Ccp_in = self.calculate_propertys_gaz(col_pressure,float(self.data_model.get_temperature()["in"])) #получаем свойства газа
-        # *_, Ccp_out = self.calculate_propertys_gaz(p_out,float(self.data_model.get_temperature()["out"])) #получаем свойства газа
+        *_,Di_in,Ccp_in = self.calculate_propertys_gaz(col_pressure,float(self.data_model.temperature["in"])) #получаем свойства газа
+        # *_, Ccp_out = self.calculate_propertys_gaz(p_out,float(self.data_model.temperature["out"])) #получаем свойства газа
       
         df.at[table_name, col_name] = Calculate_file.heat_balance(
             col_pressure, # Давление на входе
             p_out, # Давление на выходе
-            float(self.data_model.get_temperature()["in"]),
-            float(self.data_model.get_temperature()["out"]),
+            float(self.data_model.temperature["in"]),
+            float(self.data_model.temperature["out"]),
             data["boiler_power"], # Мощность котла
             Di_in,
             Ccp_in,
@@ -1286,7 +1284,7 @@ class DataSaverLoader:
         self.input_pressure_range = self.data_model.get_input_pressure_range()
         self.output_pressure_range = self.data_model.get_output_pressure_range()
         self.gas_composition = self.data_model.data_gas_composition
-        self.temperature = self.data_model.get_temperature()
+        self.temperature = self.data_model.temperature
         # Обработка таблиц
         self.name_table = self.data_model.get_table_manager()
         self.table_name = {key: manager.get_table_type() for key, manager in self.name_table.items()}
@@ -1337,7 +1335,7 @@ class DataSaverLoader:
         self.data_model.set_pressure_range("output",data["output_pressure_range"])
         print(f"{self.data_model.get_input_pressure_range()=}")
         print(f"{self.data_model.get_output_pressure_range()=}")
-        # print(f"{self.data_model.get_temperature()=}")
+        # print(f"{self.data_model.temperature=}")
         pass
 
 
