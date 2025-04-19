@@ -103,13 +103,15 @@ class Data_model:
         """Получение данных из базы данных."""
         with sqlite3.connect(self.db_path) as conn:
             df = pd.read_sql_query(f"SELECT * FROM {name_table}", conn)
-            # print(f"{df.to_dict(orient="records")[0]=}")
             self.logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
         return df.to_dict(orient="records")[0]  # Список словарей
 
     def set_tables_data(self, tables: Dict[str,Any]):
         self.tables_data = tables
         print(self.tables_data)
+        for i in self.tables_data:
+
+            print(f"{self.tables_data[i].get_table_type()=}")
         self.logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")
     
     def get_gas_properties(self):

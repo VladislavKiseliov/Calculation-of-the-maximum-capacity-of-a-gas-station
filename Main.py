@@ -448,9 +448,8 @@ class PressureRangeManager:
             showwarning("Ошибка", "Введите корректные числовые значения!")
 
 class BaseTableManager(ABC):
-    def __init__(self,parent,data_model:'Data_model',table_type):
+    def __init__(self,parent,table_type):
         self.parent = parent
-        self.data_model = data_model
         self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
         self.table_type = table_type
 
@@ -634,22 +633,22 @@ class PipeTableManager(BaseTableManager):
 
 class TableFactory:
     @staticmethod
-    def create_table_manager(table_type, parent, data_model):
+    def create_table_manager(table_type, parent):
         logger.info(f"Запрос на создание менеджера таблицы типа: '{table_type}'")
-        logger.debug(f"Параметры: parent={parent}, data_model={data_model}")
+        logger.debug(f"Параметры: parent={parent}")
 
         match table_type:
             case "Таблица для регуляторов":
                 logger.info("Создан менеджер таблицы регуляторов")
-                return RegulatorTableManager(parent, data_model,table_type)
+                return RegulatorTableManager(parent,table_type)
             
             case "Таблица котельной":
                 logger.info("Создан менеджер таблицы котельной")
-                return BoilerTableManager(parent, data_model,table_type)
+                return BoilerTableManager(parent,table_type)
             
             case "Таблицы для труб до регулятора" | "Таблицы для труб после регулятора":
                 logger.info(f"Создан менеджер таблицы труб: {table_type}")
-                return PipeTableManager(parent, data_model,table_type)
+                return PipeTableManager(parent,table_type)
             
             case _:
                 error_msg = f"Неизвестный тип таблицы: {table_type}"
@@ -722,19 +721,20 @@ class TableManager:
             self.create_window_table()
             for name in self.tables:
                 logger.debug(f"Добавление метки для таблицы: {name}")
+                print(f"{self.tables=}")
                 label = WidgetFactory.create_label(
                     self.table_window,
-                    self.tables[name][1],
+                    self.tables[name].get_table_type(),
                     self.row
                 )
                 entry = WidgetFactory.create_entry(self.table_window, self.row, 1)
                 entry.insert(0, name)
                 open_button = WidgetFactory.create_Button(
-                    self.table_window,
-                    "Открыть таблицу",
-                    self.row,
-                    lambda tn=name, tt=self.tables[name][1]: self.open_table(tn, tt),
-                    3
+                    parent =self.table_window,
+                    label_text="Открыть таблицу",
+                    row=self.row,
+                    function=lambda tn=name, tt=self.tables[name].get_table_type(): self.open_table(tn, tt),
+                    column=3
                 )
                 self.row += 1
                 logger.debug(f"Метка и кнопка для таблицы '{name}' добавлены в окно")
@@ -784,7 +784,7 @@ class TableManager:
             return
         
         logger.debug("Создание менеджера таблицы через TableFactory")
-        manager = TableFactory.create_table_manager(table_type, self.parent, self.data_model)
+        manager = TableFactory.create_table_manager(table_type, self.parent)
         manager.create_table(table_name)
         print(f"{manager=}")
         self.tables[table_name] = manager
@@ -801,17 +801,17 @@ class TableManager:
         self.tables[table_name].open_table_window(table_name)
         logger.info(f"Таблица '{table_name}' открыта")
 
-    def save_table(self, table_name):
-        logger.info(f"Попытка сохранения таблицы '{table_name}'")
-        if table_name in self.tables:
-            logger.debug("Сохранение данных через менеджер таблицы")
-            self.tables[table_name][0].save_data(
-                self.tables[table_name][0].tree,
-                table_name
-            )
-        else:
-            logger.error(f"Таблица '{table_name}' не найдена")
-            messagebox.showerror("Ошибка", f"Таблица '{table_name}' не найдена!")
+    # def save_table(self, table_name):
+    #     logger.info(f"Попытка сохранения таблицы '{table_name}'")
+    #     if table_name in self.tables:
+    #         logger.debug("Сохранение данных через менеджер таблицы")
+    #         self.tables[table_name][0].save_data(
+    #             self.tables[table_name][0].tree,
+    #             table_name
+    #         )
+    #     else:
+    #         logger.error(f"Таблица '{table_name}' не найдена")
+    #         messagebox.showerror("Ошибка", f"Таблица '{table_name}' не найдена!")
 
 class GasPropertiesManager:
     def __init__(self, parent,data_model:'Data_model'):
