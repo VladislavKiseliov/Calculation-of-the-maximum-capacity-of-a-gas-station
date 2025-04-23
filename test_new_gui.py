@@ -1,22 +1,25 @@
 import contextlib
-from abc import ABC,abstractmethod
-import tkinter as tk
-from tkinter import FALSE, Menu, ttk,filedialog
+import csv
+import json
+import logging
 import math
-from tkinter import messagebox
-from tkinter.messagebox import showwarning, showinfo
-import Calculate_file
+import os  # Import the 'os' module
+import sqlite3
+import tkinter as tk
+from abc import ABC, abstractmethod
+from tkinter import FALSE, Menu, filedialog, messagebox, ttk
+from tkinter.messagebox import showinfo, showwarning
+from typing import Any, Dict, List, Optional, TypedDict
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import os  # Import the 'os' module
-import csv
-import sqlite3
-from typing import List, Dict, Any,Optional,TypedDict
+
+import Calculate_file
 import logger_config
-import matplotlib.pyplot as plt
-import json
-from wigets  import WidgetFactory
-from DataModel import Data_model
+from DataModel import CSVManager, Data_model
+from wigets import WidgetFactory
+
 
 class WidgetFactory:  
     @staticmethod
@@ -47,19 +50,13 @@ class GuiManager:
         self._create_notebook()
         # Создаем словарь для хранения фреймов
         
-
         self.root.title("Расчеты газовых систем")
         self.root.geometry("700x300")  # Начальный размер окна
         self.root.minsize(700, 300)     # Минимальный размер окна
-        
-        # Инициализация менеджеров для каждой функциональности
-        
-        self.gas_composition_manager = Initial_data(self.tabs["Исходные данные"])
-        self.gas_properties_manager = Calculation_gas_properties(self.tabs)
-        self.tube_properties_manager = Calculation_pipi(self.tabs)
-        self.regulatormanager = Calculation_regulator(self.tabs)
-        self.heatbalancemanager = Heat_balance(self.tabs)
-
+      
+    def get_tab_frame(self,tab_name:str) -> Dict[str,tk.Frame]:
+        return self.tabs[tab_name]
+    
     def _create_menu(self):
         self.root.option_add("*tearOff", FALSE)
 
@@ -116,7 +113,7 @@ class GuiManager:
 class Initial_data:
     def __init__(self,parent):
         self.parent = parent
-        # self.data_model=data_model
+        #self.data_model=data_model
         self.create_wigets()
         self.entries = {} #Словарь хранения данных
         self.callbacks = {}  # Хранилище для колбэков
@@ -126,11 +123,11 @@ class Initial_data:
         self.button_temp = WidgetFactory.create_Button(parent=self.parent,label_text="Температура газа",row=2,function=self.create_window_temperature)
         self.input_pressure = WidgetFactory.create_Button(parent=self.parent, label_text="Диапазон входных давлений",row=3,function=lambda: self.callbacks.get("input_pressure")())
         self.output_pressure = WidgetFactory.create_Button(parent=self.parent, label_text="Диапазон выходных давлений",row=4,function=lambda: self.callbacks.get("output_pressure")())
-        self.input_table_button = WidgetFactory.create_Button(parent=self.parent,label_text="Исходные таблицы",row=5,function=self.create_window_table)
+        self.input_table_button = WidgetFactory.create_Button(parent=self.parent,label_text="Исходные таблицы",row=5,function=lambda: self.callbacks.get("table")())
         self.calculate_button = WidgetFactory.create_Button(self.parent, label_text="Автоматический расчет",row=6)
         self.calculate_button.config(state="disabled")
  
-    def create_window_sostav_gaz(self):
+    def create_window_sostav_gaz(self,data:Dict[str,float]):
         # Окно для ввода состава газа
         self.gas_window = tk.Toplevel(self.parent)
         self.gas_window.title("Состав газа")
@@ -147,6 +144,7 @@ class Initial_data:
         # Создаем метки и поля ввода для каждого компонента
         
         mediana = int((len(self.components)/2.0)) - 1
+
         for i, component in enumerate(self.components):
 
             if i <=mediana:
@@ -155,25 +153,34 @@ class Initial_data:
             else:
                 label = WidgetFactory.create_label(self.gas_window, component,i-15,3)
                 enty = WidgetFactory.create_entry(self.gas_window,i-15,4)
+
+            if component in data:
+                enty.delete(0, tk.END)
+                enty.insert(0, str(data[component]))
+
+
             enty.bind("<KeyRelease>", self.update_total_percentage)
             self.entries[component] = enty
 
         self.total_label = WidgetFactory.create_label(parent=self.gas_window,label_text="Сумма: 0.0%",row=math.floor((len(self.components)/2)),column = 4  )
         # Load previously saved composition, if available
-
+        self.update_total_percentage()
         self.row_last_components = math.ceil((len(self.components)/2)+1)
 
         # Кнопка для сохранения данных
         self.save_gaz_sostav_button = WidgetFactory.create_Button(self.gas_window, "Сохранить", 
-                                                                  self.row_last_components,function=lambda: self.callbacks.get("save_sostav_gaz")())
+                                                                  self.row_last_components,
+                                                                  function=lambda: self.callbacks.get("save_sostav_gaz")())
         #Кнопка для сохранения в файл
         self.save_to_file_button = WidgetFactory.create_Button(parent=self.gas_window,label_text="Сохранить в файл",
-                                                               row = self.row_last_components+1,function=lambda: self.callbacks.get("save_gas_composition_to_csv")())
+                                                               row = self.row_last_components+1,
+                                                               function=lambda: self.callbacks.get("save_gas_composition_to_csv")())
          #Кнопка для открытия из файла
         self.load_from_file_button = WidgetFactory.create_Button(self.gas_window,"Открыть из файла",
-                                                                 self.row_last_components+2,function=lambda: self.callbacks.get("load_gas_composition_to_csv")())
+                                                                 self.row_last_components+2,
+                                                                 function=lambda: self.callbacks.get("load_gas_composition_to_csv")())
 
-    def update_total_percentage(self, event=None):
+    def update_total_percentage(self, event = None):
         """
         Подсчитывает сумму процентов из всех полей ввода и обновляет метку.
         """
@@ -185,9 +192,9 @@ class Initial_data:
         # Обновляем метку с суммой
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
-    def create_window_temperature(self):
+    def create_window_temperature(self,data:Dict[str,float]):
         """Открывает диалог для ввода температур."""
-        self.entries_dict = {}
+        self.temperature_entries = {}
         pressure_window = tk.Toplevel(self.parent)
         pressure_window.attributes('-topmost', True)
         pressure_window.title("Температурный режим")
@@ -198,9 +205,7 @@ class Initial_data:
         ]):
             WidgetFactory.create_label(parent=pressure_window, label_text=label_text, row=idx)
             entry = WidgetFactory.create_entry(parent=pressure_window, row=idx)
-            self.entries_dict[title] = entry  # Сохраняем Entry по имени
-
-        print(self.entries_dict)
+            self.temperature_entries[title] = entry  # Сохраняем Entry по имени
         
         # # temperature = self.data_model.get_temperature()
         # print(f"{temperature=}")
@@ -234,6 +239,20 @@ class Initial_data:
 
         self.save_button = WidgetFactory.create_Button(parent=pressure_window,label_text="Сохранить",row=4,function=lambda: self.callbacks.get("save_pressure_range")())
    
+    def register_callback(self, event_name, callback):
+        """
+        Регистрирует колбэк для определённого события.
+        """
+        self.callbacks[event_name] = callback
+
+
+
+
+class GuiTable:
+    def __init__(self,parent):
+        self.parent = parent
+        self.row=3
+    
     def create_window_table(self):
         self.tables = {}  # Хранит все таблицы: {"table_name": manager}
         self.table_labels = [
@@ -259,34 +278,108 @@ class Initial_data:
 
         # Кнопка добавления таблицы
         save_button = WidgetFactory.create_Button(
+            parent=self.table_window,
+            label_text="Добавить таблицу",
+            row=2,
+            function=self.add_table
+        )
+    
+    def add_table(self):
+
+        selection = self.combobox.get()
+        if not selection:
+            logger.error("Тип таблицы не выбран")
+            print("Ошибка: Таблица не выбрана!")
+            return
+        self.row += 1
+
+        # Метка с названием таблицы
+        label = WidgetFactory.create_label(
             self.table_window,
-            "Добавить таблицу",
-            2,
+            label_text=selection,
+            row=self.row
+        )
+        # Поле ввода имени таблицы
+        entry = WidgetFactory.create_entry(self.table_window, self.row, 1)
+
+        # Кнопка для открытия таблицы
+        open_button = WidgetFactory.create_Button(
+            self.table_window,
+            "Открыть таблицу",
+            self.row,
+            lambda : self.open_table_window("1"),
+            3
         )
 
-    def register_callback(self, event_name, callback):
-        """
-        Регистрирует колбэк для определённого события.
-        """
-        self.callbacks[event_name] = callback
+    def open_table_window(self, table_name):# Перенести в Gui
+        """Открывает окно с таблицей."""
+        logger.info(f"Открытие окна таблицы '{table_name}'")
+        try:
+            window = tk.Toplevel(self.parent)
+            window.title(f"Таблица: {table_name}")
+            logger.debug(f"Создано новое окно для таблицы '{table_name}'")
+
+            self.tree = ttk.Treeview(window, columns=["1","2"], show="headings")
+            for col in ["1","2"]:
+                self.tree.heading(col, text=col)
+            self.tree.pack(fill="both", expand=True)
+            logger.debug("Treeview инициализирован с колонками")
+
+            # self.load_table(table_name)
+            logger.debug("Данные загружены в Treeview")
+
+            save_button = ttk.Button(
+                window,
+                text="Сохранить данные",
+                command=lambda: self.save_data(self.tree, table_name,window)
+            )
+            save_button.pack(pady=10)
+            logger.debug("Кнопка сохранения добавлена в окно")
+
+            # self.tree.bind("<Double-1>", self.add_editing_features)
+            logger.debug("Событие двойного клика привязано к редактированию ячеек")
+
+        except Exception as e:
+            logger.exception(f"Ошибка при открытии окна таблицы '{table_name}'")
+            messagebox.showerror("Ошибка", f"Не удалось открыть таблицу: {e}")
+
 
 class Сontroller:
-    def __init__(self,initial_data:Initial_data,model:'Model'):
+    
+    def __init__(self,initial_data:Initial_data,model:'Model',guitable:GuiTable):
+        self.logger = logging.getLogger("App.Сontroller")  # Дочерний логгер
         self.initial_data = initial_data
         self.model = model
+        self.guitable = guitable
+        self.logger.info("Контроллер работает")
 
         #Регистрируем колбеки
         self.initial_data.register_callback("save_gas_composition", self.gaz_window)# "Сохранить состав газа"
+
         for pressure_type in ["input", "output"]:
             self.initial_data.register_callback(
                 f"{pressure_type}_pressure",
                 lambda pt=pressure_type: self.setup_button_pressure(pt)
             )# Колбек на открытия меню входного и выходного давления
-        self.initial_data.register_callback("save_gas_composition_to_csv",self.save_sostav_csv)
-        self.initial_data.register_callback("load_gas_composition_to_csv",self.model.load_gaz_from_csv)
-        self.initial_data.register_callback("save_sostav_gaz",lambda : self.model.save_sostav_gaz(self.initial_data.entries))
+
+        self.initial_data.register_callback(
+            "save_gas_composition_to_csv",
+            lambda : self.save_sostav_gaz(entries=self.initial_data.entries,to_csv=True)
+        )# Колбек сохранения состава газа из csv
+
+        self.initial_data.register_callback(
+            "load_gas_composition_to_csv",
+            self.model.load_gaz_from_csv
+            ) #Колбэк на загрузку данных из csv
+        
+        self.initial_data.register_callback("save_sostav_gaz",lambda : self.save_sostav_gaz(self.initial_data.entries))#сохранения состава газа в DataModel
+        
+        self.initial_data.register_callback("save_temperature",lambda :self.save_temperature(self.initial_data.temperature_entries))
+
+        self.initial_data.register_callback("table",self.guitable.create_window_table)
         
     def setup_button_pressure(self,title): # Функция для создание диапазона входных и выходных давлений
+
         self.initial_data.create_window_pressure(title) #Создаем окно
         # # Загрузка предыдущих значений
         if pressure_range := getattr(self.model.data_model, f"get_{title.lower()}_pressure_range")():
@@ -300,16 +393,37 @@ class Сontroller:
             ))# Привязываю функцию для сохранение диапазона давлениея
         
     def gaz_window(self):
-        self.initial_data.create_window_sostav_gaz()
-        self.model.load_gas_composition(self.initial_data.entries)
-        self.initial_data.update_total_percentage()
-    
-    def save_sostav_csv(self):
-        self.model.save_sostav_gaz(self.initial_data.entries)
-        self.model.save_gaz_from_csv()
+        """
+        Create window for gas composition
+        """
+        data = self.model.load_gas_composition()
+        self.initial_data.create_window_sostav_gaz(data)
+
+    def save_sostav_gaz(self,entries:Dict[str,tk.Entry],to_csv = False):
+        """
+        Saving the gas composition in csv format and/or in storage
+        """
+        data = {}
+
+        for component in entries:
+            data[component] = entries[component].get()
+            print(f"{entries[component].get()=}")
+        model.save_sostav_gaz(data)
+
+        if to_csv:#Для сохранения в csv
+            self.model.save_gaz_to_csv()
+
+    def save_temperature(self,entries:Dict[str,tk.Entry]):
+        data = {}
+
+        for component in entries:
+            data[component] = entries[component].get()
+            print(f"{entries[component].get()=}")
+        
+
 
 class Model:
-    def __init__(self, data_model: Data_model):
+    def __init__(self, data_model: Data_model,csvmanager: CSVManager):
         self.data_model = data_model
 
     def _calculate_pressure_range(self, min_pressure, max_pressure, average_value) -> List[float]:
@@ -353,390 +467,19 @@ class Model:
             logger.warning("Введите корректные числовые значения!")
             showwarning("Ошибка", "Введите корректные числовые значения!")
 
-    def load_gas_composition(self,entries):
+    def load_gas_composition(self):
         """Loads the gas composition from the data model and updates the entry fields."""
-        saved_composition = self.data_model.data_gas_composition
-        for component, entry in entries.items():
-            if component in saved_composition:
-                entry.delete(0, tk.END)
-                entry.insert(0, str(saved_composition[component]))
+        return self.data_model.data_gas_composition
 
-    def save_sostav_gaz(self,entries):
-        self.data_model.data_gas_composition = entries   
+    def save_sostav_gaz(self,data):
+        
+        self.data_model.data_gas_composition = data   
 
-    def save_gaz_from_csv(self):
-
+    def save_gaz_to_csv(self):#Исправить на класс работы с csv
         self.data_model.save_gas_composition_to_csv()
     
-    def load_gaz_from_csv(self):
+    def load_gaz_from_csv(self):#Исправить на класс работы с csv
         self.data_model.load_gas_composition_from_csv()
-
-
-class BaseTableManager(ABC):
-    def __init__(self,parent,table_type):
-        self.parent = parent
-        self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
-        self.table_type = table_type
-
-    @abstractmethod
-    def get_columns(self) -> list:
-        pass
-    
-    def get_table_type(self) -> str:
-        return self.table_type
-    
-    def create_table(self,table_name):#Перенести в model
-        """Create table in databaze"""
-            # Логирование начала создания таблицы
-        logger.info(f"Начинаем создание таблицы '{table_name}'")
-        try:
-            # Получаем список колонок из подкласса
-            columns = self.get_columns()
-            logger.debug(f"Получены колонки: {columns}")
-
-            # Проверяем, что колонки не пустые
-            if not columns:
-                logger.error("Список колонок пуст!")
-                raise ValueError("Колонки не определены")
-
-            # Формируем SQL-запрос для создания таблицы
-            create_table_query = f'''
-                CREATE TABLE IF NOT EXISTS '{table_name}' (
-                    {", ".join([f"{col} REAL" for col in columns])}
-                )
-            '''
-            logger.debug(f"SQL-запрос создания таблицы: {create_table_query}")
-
-            # Формируем SQL-запрос для вставки данных
-            insert_query = f'''
-                INSERT INTO '{table_name}' ({", ".join(columns)}) 
-                VALUES ({", ".join(["?"] * len(columns))})
-            '''
-            logger.debug(f"SQL-запрос вставки данных: {insert_query}")
-
-            # Подключаемся к базе данных
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-
-                # Выполняем создание таблицы
-                logger.info(f"Выполняем создание таблицы '{table_name}' в базе данных")
-                cursor.execute(create_table_query)
-                logger.debug("Таблица успешно создана или уже существует")
-
-                # Выполняем вставку пустых данных для инициализации
-                logger.info("Выполняем вставку пустых данных для инициализации таблицы")
-                cursor.execute(insert_query, [""] * len(columns))
-                logger.debug("Данные успешно вставлены")
-
-        except sqlite3.OperationalError as e:
-            logger.error(f"Ошибка SQLite при создании таблицы '{table_name}': {e}")
-            logger.error(f"Запрос: {create_table_query}")
-            messagebox.showerror("Ошибка", f"Не удалось создать таблицу: {e}")
-        except Exception as e:
-            logger.exception(f"Неожиданная ошибка при создании таблицы '{table_name}'")
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
-        else:
-            logger.info(f"Таблица '{table_name}' успешно создана и инициализирована")
-        
-    def load_table(self, table_name): #Перенести в data_model
-        """Загружает данные таблицы в Treeview."""
-        logger.info(f"Начинаем загрузку данных таблицы '{table_name}'")
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
-                logger.debug(f"Загружены данные: \n{df.to_string()}")
-                for _, row in df.iterrows():
-                    self.tree.insert("", "end", values=list(row))
-            logger.info(f"Данные таблицы '{table_name}' успешно загружены")
-        except sqlite3.OperationalError as e:
-            logger.error(f"Ошибка загрузки таблицы '{table_name}': {e}")
-            messagebox.showerror("Ошибка", f"Не удалось загрузить таблицу: {e}")
-        except Exception as e:
-            logger.exception(f"Неожиданная ошибка при загрузке таблицы '{table_name}'")
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
-
-    def save_data(self, tree, table_name,window): #Перенести в data_model
-        """Сохраняет данные из Treeview в базу данных."""
-        logger.info(f"Начинаем сохранение данных таблицы '{table_name}'")
-        try:
-            data = [tree.item(item)["values"] for item in tree.get_children()]
-            logger.debug(f"Данные для сохранения: {data}")
-            columns = self.get_columns()
-            
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(f"DELETE FROM '{table_name}'")
-                cursor.executemany(f"INSERT INTO '{table_name}' VALUES ({', '.join(['?']*len(columns))})", data)
-            logger.info(f"Данные таблицы '{table_name}' успешно сохранены")
-            showinfo("Успех","Данные успешно сохранены")
-            window.destroy()
-        except sqlite3.OperationalError as e:
-            logger.error(f"Ошибка сохранения таблицы '{table_name}': {e}")
-            messagebox.showerror("Ошибка", f"Не удалось сохранить таблицу: {e}")
-        except Exception as e:
-            logger.exception(f"Неожиданная ошибка при сохранении таблицы '{table_name}'")
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
-    
-    def add_editing_features(self,event):
-        """Обработка двойного клика для редактирования ячейки."""
-        # Получаем выбранную строку и столбец
-        region = self.tree.identify_region(event.x, event.y)
-        if region != "cell":
-            return
-
-        # Получаем ID строки и имя столбца
-        item_id = self.tree.focus()
-        column = self.tree.identify_column(event.x)
-        column_index = int(column[1:]) - 1  # Индекс столбца (начиная с 0)
-
-        # Значение текущей ячейки
-        current_value = self.tree.item(item_id)["values"][column_index]
-
-        # Создаем Entry для редактирования
-        entry = ttk.Entry(self.tree)
-        entry.insert(0, str(current_value))
-        entry.focus()
-
-        # Размещение Entry поверх ячейки
-        x, y, width, height = self.tree.bbox(item_id, column)
-        entry.place(x=x, y=y, width=width, height=height)
-
-        # Обработка завершения редактирования
-        def save_edit(event=None):
-            new_value = entry.get()
-            values = list(self.tree.item(item_id)["values"])
-            values[column_index] = new_value
-            self.tree.item(item_id, values=values)
-            entry.destroy()
-        entry.bind("<Return>", save_edit)  # Сохранение при нажатии Enter
-        entry.bind("<FocusOut>", save_edit)  # Сохранение при потере фокуса
-
-    def open_table_window(self, table_name):# Перенести в Gui
-        """Открывает окно с таблицей."""
-        logger.info(f"Открытие окна таблицы '{table_name}'")
-        try:
-            window = tk.Toplevel(self.parent)
-            window.title(f"Таблица: {table_name}")
-            logger.debug(f"Создано новое окно для таблицы '{table_name}'")
-
-            self.tree = ttk.Treeview(window, columns=self.get_columns(), show="headings")
-            for col in self.get_columns():
-                self.tree.heading(col, text=col)
-            self.tree.pack(fill="both", expand=True)
-            logger.debug("Treeview инициализирован с колонками")
-
-            self.load_table(table_name)
-            logger.debug("Данные загружены в Treeview")
-
-            save_button = ttk.Button(
-                window,
-                text="Сохранить данные",
-                command=lambda: self.save_data(self.tree, table_name,window)
-            )
-            save_button.pack(pady=10)
-            logger.debug("Кнопка сохранения добавлена в окно")
-
-            self.tree.bind("<Double-1>", self.add_editing_features)
-            logger.debug("Событие двойного клика привязано к редактированию ячеек")
-
-        except Exception as e:
-            logger.exception(f"Ошибка при открытии окна таблицы '{table_name}'")
-            messagebox.showerror("Ошибка", f"Не удалось открыть таблицу: {e}")
-
-class RegulatorTableManager(BaseTableManager):
-    
-    def get_columns(self):
-        return ["regulator", "kv", "lines_count"]
-
-class BoilerTableManager(BaseTableManager):
-    def get_columns(self):
-        return ["boiler_power", "gas_temp_in", "gas_temp_out"]
-
-class PipeTableManager(BaseTableManager):
-    def get_columns(self):
-        return ["pipe_diameter", "wall_thickness", "gas_speed", "gas_temperature", "lines_count"]
-
-class TableFactory:
-    @staticmethod
-    def create_table_manager(table_type, parent):
-        logger.info(f"Запрос на создание менеджера таблицы типа: '{table_type}'")
-        logger.debug(f"Параметры: parent={parent}")
-
-        match table_type:
-            case "Таблица для регуляторов":
-                logger.info("Создан менеджер таблицы регуляторов")
-                return RegulatorTableManager(parent,table_type)
-            
-            case "Таблица котельной":
-                logger.info("Создан менеджер таблицы котельной")
-                return BoilerTableManager(parent,table_type)
-            
-            case "Таблицы для труб до регулятора" | "Таблицы для труб после регулятора":
-                logger.info(f"Создан менеджер таблицы труб: {table_type}")
-                return PipeTableManager(parent,table_type)
-            
-            case _:
-                error_msg = f"Неизвестный тип таблицы: {table_type}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-
-class TableManager:
-    def __init__(self, parent, data_model):
-        logger.info("Инициализация TableManager")
-        self.parent = parent
-        self.data_model = data_model
-        self.tables = {}  # Хранит все таблицы: {"table_name": manager}
-        logger.debug("Создание виджетов для управления таблицами")
-        self.create_widgets()
-        self.table_labels = [
-            "Таблица для регуляторов",
-            "Таблица котельной",
-            "Таблицы для труб до регулятора",
-            "Таблицы для труб после регулятора"
-        ]
-        logger.debug(f"Список доступных типов таблиц: {self.table_labels}")
-        self.row = 4
-
-    def create_widgets(self):
-        logger.info("Создание кнопки 'Исходные таблицы'")
-        input_table_button = ttk.Button(
-            self.parent,
-            text="Исходные таблицы",
-            command=self.check_table_func
-        )
-        input_table_button.grid(row=5, column=0, padx=10, pady=5, sticky="ew")
-        logger.debug("Кнопка 'Исходные таблицы' размещена в интерфейсе")
-
-    def create_window_table(self):
-        logger.info("Создание окна выбора таблиц")
-        self.table_window = tk.Toplevel(self.parent)
-        self.table_window.title("Таблицы граничных условий")
-        logger.debug("Окно таблиц создано")
-        
-        # Метка для выбора таблицы
-        label = WidgetFactory.create_label(self.table_window, "Выберите таблицу:", 0)
-        logger.debug("Метка 'Выберите таблицу' добавлена в окно")
-
-        # Combobox
-        self.combobox = ttk.Combobox(
-            self.table_window,
-            values=self.table_labels,
-            state="readonly",
-            width=33
-        )
-        self.combobox.grid(row=1, column=0, padx=5, pady=5)
-        logger.debug(f"Combobox инициализирован с вариантами: {self.table_labels}")
-
-        # Кнопка добавления таблицы
-        save_button = WidgetFactory.create_Button(
-            self.table_window,
-            "Добавить таблицу",
-            2,
-            self.define_table
-        )
-        logger.debug("Кнопка 'Добавить таблицу' добавлена в окно")
-
-    def check_table_func(self):
-        logger.info("Вызов метода check_table_func")
-        if len(self.tables) == 0:
-            logger.warning("Список таблиц пуст. Создаем новое окно.")
-            self.create_window_table()
-        else:
-            logger.info("Список таблиц не пуст. Обновляем окно.")
-            self.create_window_table()
-            for name in self.tables:
-                logger.debug(f"Добавление метки для таблицы: {name}")
-                print(f"{self.tables=}")
-                label = WidgetFactory.create_label(
-                    self.table_window,
-                    self.tables[name].get_table_type(),
-                    self.row
-                )
-                entry = WidgetFactory.create_entry(self.table_window, self.row, 1)
-                entry.insert(0, name)
-                open_button = WidgetFactory.create_Button(
-                    parent =self.table_window,
-                    label_text="Открыть таблицу",
-                    row=self.row,
-                    function=lambda tn=name, tt=self.tables[name].get_table_type(): self.open_table(tn, tt),
-                    column=3
-                )
-                self.row += 1
-                logger.debug(f"Метка и кнопка для таблицы '{name}' добавлены в окно")
-
-    def define_table(self):
-        logger.info("Начало определения новой таблицы")
-        selection = self.combobox.get()
-        if not selection:
-            logger.error("Тип таблицы не выбран")
-            print("Ошибка: Таблица не выбрана!")
-            return
-        logger.debug(f"Выбранный тип таблицы: {selection}")
-        self.row += 1
-
-        # Метка с названием таблицы
-        logger.debug("Создание метки для нового типа таблицы")
-        label = WidgetFactory.create_label(
-            self.table_window,
-            label_text=selection,
-            row=self.row
-        )
-
-        # Поле ввода имени таблицы
-        logger.debug("Создание поля ввода имени таблицы")
-        entry = WidgetFactory.create_entry(self.table_window, self.row, 1)
-
-        # Кнопка для открытия таблицы
-        open_button = WidgetFactory.create_Button(
-            self.table_window,
-            "Открыть таблицу",
-            self.row,
-            lambda: self.open_table(entry.get(), selection),
-            3
-        )
-        logger.info("Интерфейс для создания/открытия таблицы инициализирован")
-
-    def add_table(self, table_name, table_type):
-        logger.info(f"Попытка добавления таблицы '{table_name}' типа '{table_type}'")
-        
-        if table_name  == "":
-            messagebox.showwarning("Ошибка", "Введите название таблицы")
-            return
-
-        if table_name in self.tables:
-            logger.warning(f"Таблица '{table_name}' уже существует")
-            messagebox.showwarning("Ошибка", f"Таблица '{table_name}' уже существует!")
-            return
-        
-        logger.debug("Создание менеджера таблицы через TableFactory")
-        manager = TableFactory.create_table_manager(table_type, self.parent)
-        manager.create_table(table_name)
-        print(f"{manager=}")
-        self.tables[table_name] = manager
-        self.data_model.set_tables_data(self.tables)
-        logger.info(f"Таблица '{table_name}' добавлена в реестр")
-
-    def open_table(self, table_name, table_type):
-        logger.info(f"Попытка открытия таблицы '{table_name}' типа '{table_type}'")
-        if table_name not in self.tables:
-            logger.warning(f"Таблица '{table_name}' не найдена. Создаем новую.")
-            self.add_table(table_name, table_type)
-  
-        logger.debug("Открытие окна таблицы через менеджер")
-        self.tables[table_name].open_table_window(table_name)
-        logger.info(f"Таблица '{table_name}' открыта")
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -991,13 +734,20 @@ class Calculation_pipi:
 if __name__ == "__main__":
     filename =logger_config.create_log_file() 
     logger = logger_config.setup_logger(filename)
-    data_model = Data_model(logger)
 
-    model = Model(data_model)
+    data_model = Data_model()
+    csvmanager = CSVManager()
+    model = Model(data_model,csvmanager)
     root = tk.Tk()
     app = GuiManager(root)
-    controller =Сontroller(app.gas_composition_manager,model)
-    
-    
+    guitable = GuiTable(app.get_tab_frame(tab_name="Исходные данные"))
+    gas_composition_manager = Initial_data(app.get_tab_frame(tab_name="Исходные данные"))
+    # gas_properties_manager = Calculation_gas_properties(app.get_tab_frame())
+    # tube_properties_manager = Calculation_pipi(app.get_tab_frame())
+    # regulatormanager = Calculation_regulator(app.get_tab_frame())
+    # heatbalancemanager = Heat_balance(app.get_tab_frame())
+
+    controller =Сontroller(gas_composition_manager,model,guitable)
+
 
     root.mainloop()

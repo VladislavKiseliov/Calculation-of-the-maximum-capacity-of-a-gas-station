@@ -4,7 +4,7 @@ import os  # Import the 'os' module
 
 def setup_logger(filename):
     # Создаем логгер
-    logger = logging.getLogger("GasAppLogger")
+    logger = logging.getLogger("App")
     logger.setLevel(logging.DEBUG)
 
     # Формат сообщений

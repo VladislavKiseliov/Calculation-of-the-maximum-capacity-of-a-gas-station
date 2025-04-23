@@ -1,12 +1,17 @@
+import csv
+import logging
 import os
-from tkinter import filedialog
-from typing import List, Dict, Any,Optional,TypedDict
 import sqlite3
+import tkinter as ttk
+from tkinter import filedialog
+from tkinter.messagebox import showinfo, showwarning
+from typing import Any, Dict, List, Optional, TypedDict
+
 import numpy as np
 import pandas as pd
-import tkinter as ttk
-import csv
-from tkinter.messagebox import showwarning, showinfo
+
+import logger_config
+
 
 class Data_model:
     """Stores and manages application data.
@@ -14,8 +19,8 @@ class Data_model:
     various data used in the application, such as gas composition,
     pressure ranges, table data, and gas properties.
     """
-    def __init__(self,logger):
-        self.logger = logger
+    def __init__(self):
+        self.logger = logging.getLogger("App.DataModel")  # Дочерний логгер
         self.gas_composition = {}
         self.input_pressure_range = []
         self.output_pressure_range = None
@@ -29,13 +34,13 @@ class Data_model:
         return self.gas_composition
     
     @data_gas_composition.setter
-    def data_gas_composition(self, composition: Dict[str,ttk.Entry]):
+    def data_gas_composition(self, composition: Dict[str,str]):
         # Сохраняем введенные данные
         total_percentage = 0.0
         self.gas_composition = {} #Очищаем словарь, что бы не накладывало значения
-        for component, entry in composition.items():
+        for component, percentage in composition.items():
             try:
-                percentage = float(entry.get())
+                percentage = float(percentage)
                 if percentage < 0:
                     raise ValueError("Отрицательное значение")
                 self.gas_composition[component] = percentage
@@ -55,7 +60,7 @@ class Data_model:
             self.logger.info("Состав газа сохранен")
             print(self.gas_composition)
            
-    def set_gas_composition_from_file(self, loaded_composition):
+    def set_gas_composition_from_file(self, loaded_composition): #Скорее всего убрать
         """
         Sets the gas composition from a loaded dictionary.
 
@@ -110,7 +115,6 @@ class Data_model:
         self.tables_data = tables
         print(self.tables_data)
         for i in self.tables_data:
-
             print(f"{self.tables_data[i].get_table_type()=}")
         self.logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")
     
@@ -126,12 +130,17 @@ class Data_model:
         return self._temperature
     
     @temperature.setter
-    def temperature(self,temp):
+    def temperature(self,temp:float):
         print(temp)
         self._temperature = {"in":temp[0],"out":temp[1]}
         self.logger.info(f"Данные температуры газа {self._temperature} сохранены в Data_model")
 
-    def save_gas_composition_to_csv(self):
+
+class CSVManager:
+    def __init__(self):
+        self.logger = logging.getLogger("App.CSVManager")  # Дочерний логгер
+
+    def save_gas_composition_to_csv(self,gas_composition:Dict[str,float]):
         """Saves the current gas composition to a CSV file."""
         try:
             # Открываем проводник для выбора пути и имени файла
@@ -151,7 +160,7 @@ class Data_model:
                 writer = csv.writer(csvfile)
                 writer.writerow(["Component", "Percentage"])  # Заголовок таблицы
 
-                for component, percentage in self.gas_composition.items():
+                for component, percentage in gas_composition.items():
                         writer.writerow([component, percentage])
           
             # Уведомляем пользователя об успешном сохранении
@@ -162,9 +171,8 @@ class Data_model:
             # Обрабатываем ошибки при сохранении
             showwarning("Ошибка", f"Не удалось сохранить в файл: {e}")
 
-    def load_gas_composition_from_csv(self):
-        """Loads the gas composition from a CSV file and updates the entry fields."""
-
+    def load_gas_composition_from_csv(self)-> Dict[str,float]:
+        """Loads the gas composition from a CSV file """
         try:
             # Открываем проводник для выбора файла
             file_path = filedialog.askopenfilename(
@@ -195,9 +203,8 @@ class Data_model:
                         self.logger.warning(f"{loaded_composition[row["Component"]]} = 0.0")
 
                 # Устанавливаем состав газа в модели и обновляем поля ввода
-                self.data_model.set_gas_composition_from_file(loaded_composition)
-                self.load_gas_composition()  # Обновляем поля ввода
-
+                return loaded_composition
+                
             # Уведомляем пользователя об успешной загрузке
             showinfo("Успех", f"Состав газа загружен из файла: {file_path}")
             self.logger.info(f"Состав газа загружен из файла: {file_path}")
@@ -206,3 +213,34 @@ class Data_model:
             # Обрабатываем ошибки при загрузке
             self.logger.error("Ошибка", f"Не удалось загрузить из файла: {e}")
             showwarning("Ошибка", f"Не удалось загрузить из файла: {e}")
+
+class DataBaseManager:
+    def __init__(self):
+        self.logger = logging.getLogger("App.DataBaseManager")  # Дочерний логгер
+
+    def create_table_query(self,colums:List[str],table_name:str) -> str:
+        """Create a request to create a table in the database"""
+        # Проверяем, что колонки не пустые
+        if not colums:
+            self.logger.error("Список колонок пуст!")
+            raise ValueError("Колонки не определены") 
+        # Формируем SQL-запрос для создания таблицы
+        create_table_query = f'''
+            CREATE TABLE IF NOT EXISTS '{table_name}' (
+                {", ".join([f"{col} REAL" for col in colums])}
+            )
+        '''
+        self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query}")
+
+    def insert_query(self,colums:List[str],table_name:str) -> str:
+        """Create a request to insert data into the table"""
+        insert_query = f'''
+            INSERT INTO '{table_name}' ({", ".join(colums)}) 
+            VALUES ({", ".join(["?"] * len(colums))})
+        '''
+        self.logger.debug(f"SQL-запрос вставки данных: {insert_query}")
+        
+
+class JsonManager:
+    def __init__(self):
+        self.logger = logging.getLogger("App.JsonManager")  # Дочерний логгер
