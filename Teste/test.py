@@ -35,9 +35,16 @@ import matplotlib.pyplot as plt
 # plt.show()
 
 
-table = {"name":[1,2],"age":[3,4]}
-data = [1,2,3,4,5]
-print(table["name"])
-print(table["name"][0])
-for i in data:
-    print(lambda x=i: print(x))
+table = {"name":[1,2]}
+# data = [1,2,3,4,5]
+# print(table["name"])
+# print(table["name"][0])
+# for i in data:
+#     print(lambda x=i: print(x))
+# Распаковка ключа
+[yiti] = table
+
+# Получение значения
+value = table[yiti]
+
+print(yiti,value)

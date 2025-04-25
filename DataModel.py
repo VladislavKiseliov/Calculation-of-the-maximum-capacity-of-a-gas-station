@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tkinter as ttk
 from tkinter import filedialog
+from tkinter import messagebox
 from tkinter.messagebox import showinfo, showwarning
 from typing import Any, Dict, List, Optional, TypedDict
 
@@ -135,7 +136,6 @@ class Data_model:
         self._temperature = {"in":temp[0],"out":temp[1]}
         self.logger.info(f"Данные температуры газа {self._temperature} сохранены в Data_model")
 
-
 class CSVManager:
     def __init__(self):
         self.logger = logging.getLogger("App.CSVManager")  # Дочерний логгер
@@ -215,10 +215,12 @@ class CSVManager:
             showwarning("Ошибка", f"Не удалось загрузить из файла: {e}")
 
 class DataBaseManager:
+
     def __init__(self):
         self.logger = logging.getLogger("App.DataBaseManager")  # Дочерний логгер
+        self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
 
-    def create_table_query(self,colums:List[str],table_name:str) -> str:
+    def _create_table_query(self,colums:List[str],table_name:str) -> str:
         """Create a request to create a table in the database"""
         # Проверяем, что колонки не пустые
         if not colums:
@@ -232,14 +234,96 @@ class DataBaseManager:
         '''
         self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query}")
 
-    def insert_query(self,colums:List[str],table_name:str) -> str:
+    def _insert_query(self,colums:List[str],table_name:str) -> str:
         """Create a request to insert data into the table"""
         insert_query = f'''
             INSERT INTO '{table_name}' ({", ".join(colums)}) 
             VALUES ({", ".join(["?"] * len(colums))})
         '''
         self.logger.debug(f"SQL-запрос вставки данных: {insert_query}")
-        
+
+    def save_data(self, data: Dict[str,List[float]], table_name:str, columns: List[str]):
+        """Сохраняет данные из Treeview в базу данных."""
+        self.logger.info(f"Начинаем сохранение данных таблицы '{table_name}'")
+        try:
+            self.logger.debug(f"Данные для сохранения: {data}")
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"DELETE FROM '{table_name}'")
+                cursor.executemany(f"INSERT INTO '{table_name}' VALUES ({', '.join(['?']*len(columns))})", data)
+            self.logger.info(f"Данные таблицы '{table_name}' успешно сохранены")
+            showinfo("Успех","Данные успешно сохранены")
+        except sqlite3.OperationalError as e:
+            self.logger.error(f"Ошибка сохранения таблицы '{table_name}': {e}")
+            messagebox.showerror("Ошибка", f"Не удалось сохранить таблицу: {e}")
+        except Exception as e:
+            self.logger.exception(f"Неожиданная ошибка при сохранении таблицы '{table_name}'")
+            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+
+    def load_data(self,table_name : str):
+        """Загружает данные таблицы в Treeview."""
+
+        self.logger.info(f"Начинаем загрузку данных таблицы '{table_name}'")
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
+                self.logger.debug(f"Загружены данные: \n{df.to_string()}")
+
+                for _, row in df.iterrows():
+                    self.tree.insert("", "end", values=list(row))
+
+            self.logger.info(f"Данные таблицы '{table_name}' успешно загружены")
+
+        except sqlite3.OperationalError as e:
+            self.logger.error(f"Ошибка загрузки таблицы '{table_name}': {e}")
+            messagebox.showerror("Ошибка", f"Не удалось загрузить таблицу: {e}")
+
+        except Exception as e:
+            self.logger.exception(f"Неожиданная ошибка при загрузке таблицы '{table_name}'")
+            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+
+    def create_table(self,table_name:str,columns:List[str]):
+        """Create table in databaze"""
+            # Логирование начала создания таблицы
+        self.logger.info(f"Начинаем создание таблицы '{table_name}'")
+        try:
+            # Проверяем, что колонки не пустые
+            if not columns:
+                self.logger.error("Список колонок пуст!")
+                raise ValueError("Колонки не определены")
+
+            # Формируем SQL-запрос для создания таблицы
+            create_table_query=self._create_table_query(columns,table_name)
+            self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query}")
+
+            # Формируем SQL-запрос для вставки данных
+            insert_query = self._insert_query(columns,table_name)
+            self.logger.debug(f"SQL-запрос вставки данных: {insert_query}")
+
+            # Подключаемся к базе данных
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+
+                # Выполняем создание таблицы
+                self.logger.info(f"Выполняем создание таблицы '{table_name}' в базе данных")
+                cursor.execute(create_table_query)
+                self.logger.debug("Таблица успешно создана или уже существует")
+
+                # Выполняем вставку пустых данных для инициализации
+                self.logger.info("Выполняем вставку пустых данных для инициализации таблицы")
+                cursor.execute(insert_query, [""] * len(columns))
+                self.logger.debug("Данные успешно вставлены")
+
+        except sqlite3.OperationalError as e:
+            self.logger.error(f"Ошибка SQLite при создании таблицы '{table_name}': {e}")
+            self.logger.error(f"Запрос: {create_table_query}")
+            messagebox.showerror("Ошибка", f"Не удалось создать таблицу: {e}")
+        except Exception as e:
+            self.logger.exception(f"Неожиданная ошибка при создании таблицы '{table_name}'")
+            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+        else:
+            self.logger.info(f"Таблица '{table_name}' успешно создана и инициализирована")
 
 class JsonManager:
     def __init__(self):
