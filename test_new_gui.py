@@ -13,7 +13,7 @@ import Calculate_file
 import logger_config
 from DataModel import CSVManager, Data_model, DataBaseManager
 from wigets import WidgetFactory
-
+from Tab_calculate import Calculation_gas_properties,Calculation_regulator,Heat_balance,Calculation_pipi
 
 class WidgetFactory:
     @staticmethod
@@ -134,6 +134,7 @@ class GuiManager:
 
 
 class Initial_data:
+
     def __init__(self, parent, callback: CallbackRegistry):
         self.callback = callback
         self.parent = parent
@@ -141,8 +142,7 @@ class Initial_data:
         self.entries = {}  # Словарь хранения данных
         self.callbacks = {}  # Хранилище для колбэков
 
-        self.guitable = GuiTable(self.parent)
-
+    
     def create_wigets(self):
         self.gas_button = WidgetFactory.create_Button(
             self.parent,
@@ -284,8 +284,9 @@ class Initial_data:
         # Обновляем метку с суммой
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
-    def create_window_temperature(self, data: Dict[str, float]):
+    def create_window_temperature(self):
         """Открывает диалог для ввода температур."""
+        # data: Dict[str, float]
         self.temperature_entries = {}
         pressure_window = tk.Toplevel(self.parent)
         pressure_window.attributes("-topmost", True)
@@ -317,30 +318,33 @@ class Initial_data:
         Открывает диалоговое окно для ввода диапазона давлений.
         """
         self.title = title
-        pressure_window = tk.Toplevel(self.parent)
-        pressure_window.title(self.title)
+        self.pressure_window = tk.Toplevel(self.parent)
+        self.pressure_window.title(self.title)
 
         labels = ["Минимальное давление:", "Максимальное давление:", "Шаг значения"]
         self.pressure_entries = {}
 
         for i, label_text in enumerate(labels):
-            ttk.Label(pressure_window, text=label_text).grid(
+            ttk.Label(self.pressure_window, text=label_text).grid(
                 row=i, column=0, padx=5, pady=5
             )
-            entry = WidgetFactory.create_entry(pressure_window, row=i, column=1)
+            entry = WidgetFactory.create_entry(self.pressure_window, row=i, column=1)
             self.pressure_entries[labels[i]] = entry
 
         self.save_button = WidgetFactory.create_Button(
-            parent=pressure_window,
+            parent=self.pressure_window,
             label_text="Сохранить",
             row=4,
-            function=lambda: self.callbacks.get("save_pressure_range")(),
+            function=lambda: self.callback.trigger("save_pressure_range"),
         )
+        
 
 
 class GuiTable:
-    def __init__(self, parent):
+    
+    def __init__(self, parent,callback):
         self.parent = parent
+        self.callback = callback
         self.row = 3
         self.tables = {}  # Хранит все таблицы: {"table_name": manager}
         self.table_labels = [
@@ -426,7 +430,7 @@ class GuiTable:
 
             logger.debug("Данные загружены в Treeview")
 
-            self.save_data_button = ttk.Button(window, text="Сохранить данные")
+            self.save_data_button = ttk.Button(window, text="Сохранить данные",command= lambda: self.callback.trigger("save_table"))
 
             # self.save_button.pack(pady=10)
             # Замените pack на grid для кнопки
@@ -483,7 +487,6 @@ class GuiTable:
             ][0]
         }
 
-
 class BaseTableManager(ABC):
     def __init__(self, table_type):
         self.table_type = table_type
@@ -495,16 +498,13 @@ class BaseTableManager(ABC):
     def get_table_type(self) -> str:
         return self.table_type
 
-
 class RegulatorTableManager(BaseTableManager):
     def get_columns(self):
         return ["regulator", "kv", "lines_count"]
 
-
 class BoilerTableManager(BaseTableManager):
     def get_columns(self):
         return ["boiler_power", "gas_temp_in", "gas_temp_out"]
-
 
 class PipeTableManager(BaseTableManager):
     def get_columns(self):
@@ -515,7 +515,6 @@ class PipeTableManager(BaseTableManager):
             "gas_temperature",
             "lines_count",
         ]
-
 
 class TableFactory:
     @staticmethod
@@ -543,6 +542,7 @@ class TableFactory:
 
 
 class TableController:
+
     def __init__(self, guitable: GuiTable, callback: CallbackRegistry):
         self.logger = logging.getLogger("App.TableController")  # Дочерний логгер
         self.callback = callback
@@ -580,20 +580,23 @@ class TableController:
         self.guitable.open_table_window(
             table_name, self.tables[table_name].get_columns()
         )
+    
     def get_table_data(self) -> Dict[str, List[float]]:
         return self.guitable.get_data_table()
 
 
 class Сontroller:
     def __init__(
-        self, initial_data: Initial_data, model: "Model", callback: CallbackRegistry):
+        self, initial_data: Initial_data, model: "Model", callback: CallbackRegistry,table_controller):
         self.logger = logging.getLogger("App.Сontroller")  # Дочерний логгер
         self.callback = callback
         self.initial_data = initial_data
-        self.table_controller = TableController(self.initial_data.guitable, callback)
+        self.table_controller = table_controller
         self.model = model
         self.logger.info("Контроллер работает")
+        self._register_callback()
 
+    def _register_callback(self):
         self.callback.register(
             "save_gas_composition", self.gaz_window
         )  # "Сохранить состав газа"
@@ -624,9 +627,9 @@ class Сontroller:
             lambda: self.save_temperature(self.initial_data.temperature_entries),
         )
 
-    def setup_button_pressure(
-        self, title
-    ):  # Функция для создание диапазона входных и выходных давлений
+        self.callback.register("save_table",self.save_table)
+        
+    def setup_button_pressure(self, title):  # Функция для создание диапазона входных и выходных давлений
         self.initial_data.create_window_pressure(title)  # Создаем окно
         # # Загрузка предыдущих значений
         if pressure_range := getattr(
@@ -643,12 +646,14 @@ class Сontroller:
             )
 
         self.callback.register(
-            "save_pressure_range",
-            lambda: self.model.save_pressure_range1(
-                self.initial_data.title,  # Передаем title
+            "save_pressure_range",self.save_pressure)  # Привязываю функцию для сохранение диапазона давлениея
+
+    def save_pressure(self):
+        self.model.save_pressure_range1(
+            self.initial_data.title,  # Передаем title
                 self.initial_data.pressure_entries,  # Передаем поля для ввода
-            ),
-        )  # Привязываю функцию для сохранение диапазона давлениея
+            )
+        self.initial_data.pressure_window.destroy() #Закрывает окно при успешном сохранении
 
     def gaz_window(self):
         """
@@ -667,6 +672,8 @@ class Сontroller:
         if to_csv:  # Для сохранения в csv
             self.model.save_gaz_to_csv()
 
+        self.initial_data.gas_window.destroy() #Закрывает окно при успешном сохранении
+
     def save_temperature(self, entries: Dict[str, tk.Entry]):
         data = {}
 
@@ -675,10 +682,9 @@ class Сontroller:
             print(f"{entries[component].get()=}")
 
     def save_table(self):
-        data = self.initial_data.get_table_data()
+        data = self.table_controller.get_table_data()
         print(f"{data=}")
         self.model.data_table(data)
-
 
 class Model:
     def __init__(
@@ -761,310 +767,41 @@ class Model:
             iter(data.items())
         )  # Берем первую (и единственную) пару ключ-значение
         self.data_base_manager.create_table(key, ["1", "2"])
-        self.data_base_manager.save_data(data1, key, ["1", "2"])
+        # self.data_base_manager.save_data(data1, key, ["1", "2"])
 
 
-class Calculation_gas_properties:
-    def __init__(self, parent):
-        self.parent = parent["Свойства газа"]
-        # self.data_model = data_model
-        self.create_widgets()
-        self.list = []
-
-    def create_widgets(self):
-        # Кнопка для ввода свойств газа
-        gas_button = WidgetFactory.create_Button(
-            parent=self.parent, label_text="Расчитать", row=2
-        )
-
-        label_pressure = WidgetFactory.create_label(self.parent, "Давление, МПа", 0, 0)
-        label_temperature = WidgetFactory.create_label(
-            self.parent, "Температура, ℃", 1, 0
-        )
-        self.entry_pressure = WidgetFactory.create_entry(self.parent, 0, 1)
-        self.entry_temperature = WidgetFactory.create_entry(self.parent, 1, 1)
-
-        self.gaz_text = tk.Text(self.parent, height=10, width=70, state="disabled")
-        self.gaz_text.grid(row=0, column=3, rowspan=4, padx=10, pady=5, sticky="nsew")
-
-    def start(self):
-        try:
-            p_in = float(self.entry_pressure.get())  # Получаем давление
-            t_in = float(self.entry_temperature.get())  # Получаем температуру
-        except ValueError:
-            self.gaz_text.config(state="normal")
-            self.gaz_text.delete("1.0", tk.END)
-            self.gaz_text.insert(
-                tk.END, "Ошибка: Введите числовые значения для давления и температуры."
-            )
-            self.gaz_text.config(state="disabled")
-            return
-
-        # gas_composition = self.data_model.data_gas_composition  # Получаем состав газа
-        # rho_rab, z, plotnost,Di,Ccp = Calculate_file.data_frame(p_in, t_in, gas_composition)
-
-        # self.data_model.set_gas_properties([rho_rab, z, plotnost,Di,Ccp])
-
-        self.gaz_text.config(state="normal")
-        self.gaz_text.delete("1.0", tk.END)
-        self.gaz_text.insert(
-            tk.END, f"=== Введенные данные ===\nДавление: {p_in}\nТемпература: {t_in}\n"
-        )
-        self.gaz_text.insert(
-            tk.END, f"Плотность смеси при рабочих условиях: {rho_rab:.2f} кг/м3 \n"
-        )
-        self.gaz_text.insert(tk.END, f"Коэффициент сжимаемости: {z}\n")
-        self.gaz_text.insert(
-            tk.END, f"Плотность смеси при стандартных условиях: {plotnost:.4f} кг/м3 "
-        )
-        self.gaz_text.config(state="disabled")
-
-class Calculation_regulator:
-    def __init__(self, parent):
-        self.parent = parent["Расчет регулятора"]
-        # self.data_model = data_model
-        self.entries = {}
-        self.create_widgets()
-
-    def create_widgets(self):
-        # Кнопка для ввода свойств газа
-        gas_button = WidgetFactory.create_Button(self.parent, "Расчитать", 9)
-        name_label = [
-            "Давление вход, МПа",
-            "Давление выход, МПа",
-            "Температура, ℃",
-            "Kv",
-            "Количество линий",
-        ]
-        for i, name in enumerate(name_label):
-            label = WidgetFactory.create_label(self.parent, name, i, 0)
-            entry = WidgetFactory.create_entry(self.parent, i, 1)
-            self.entries[name] = entry
-
-        self.regul_text = tk.Text(self.parent, height=10, width=50, state="disabled")
-        self.regul_text.grid(row=0, column=3, rowspan=4, padx=10, pady=5, sticky="nsew")
-
-    def calc_regul(self):
-        try:
-            input_values = {}
-            for name, entry in self.entries.items():
-                value = float(entry.get())
-                input_values[name] = value
-            gas_composition = (
-                self.data_model.data_gas_composition
-            )  # Получаем состав газа
-            rho_rab, z, plotnost, Di, Ccp = Calculate_file.data_frame(
-                input_values["Давление вход, МПа"],
-                input_values["Температура, ℃"],
-                gas_composition,
-            )
-            q = Calculate_file.calculate_Ky(
-                input_values["Давление вход, МПа"],
-                input_values["Давление выход, МПа"],
-                input_values["Температура, ℃"],
-                plotnost,
-                input_values["Kv"],
-                input_values["Количество линий"],
-            )
-
-        except ValueError:
-            self.regul_text.insert(tk.END, "Ошибка: Введите числовые значения.")
-
-        self.regul_text.config(state="normal")
-        self.regul_text.delete("1.0", tk.END)
-        self.regul_text.insert(
-            tk.END, f"Входное давление = {input_values['Давление вход, МПа']}\n"
-        )
-        self.regul_text.insert(
-            tk.END, f"Выходное давление = {input_values['Давление выход, МПа']}\n"
-        )
-        self.regul_text.insert(tk.END, f"Расход = {q}\n")
-        self.regul_text.config(state="disabled")
-
-class Heat_balance:
-    def __init__(self, parent):
-        self.parent = parent["Тепловой баланс"]
-        # self.data_model = data_model
-        self.entries = {}
-        self.create_widgets()
-
-    def create_widgets(self):
-        # Кнопка для ввода свойств газа
-        gas_button = WidgetFactory.create_Button(self.parent, "Расчитать", 9)
-        name_label = [
-            "Давление вход, МПа",
-            "Давление выход, МПа",
-            "Температура вход, ℃",
-            "Температура выход, ℃",
-            "Мощность котельной, кВт",
-        ]
-        for i, name in enumerate(name_label):
-            label = WidgetFactory.create_label(self.parent, name, i, 0)
-            entry = WidgetFactory.create_entry(self.parent, i, 1)
-            self.entries[name] = entry
-
-        self.heat_balance_text = tk.Text(
-            self.parent, height=10, width=50, state="disabled"
-        )
-        self.heat_balance_text.grid(
-            row=0, column=3, rowspan=4, padx=10, pady=5, sticky="nsew"
-        )
-
-    def calc_heat_balance(self):
-        try:
-            input_values = {}
-            self.heat_balance_text.config(state="normal")
-            self.heat_balance_text.delete("1.0", tk.END)
-            for name, entry in self.entries.items():
-                value = float(entry.get())
-                input_values[name] = value
-            gas_composition = (
-                self.data_model.data_gas_composition
-            )  # Получаем состав газа
-            rho_rab_in, z_in, plotnost_in, Di_in, Cc_in = Calculate_file.data_frame(
-                input_values["Давление вход, МПа"],
-                input_values["Температура вход, ℃"],
-                gas_composition,
-            )
-            # rho_rab_out, z_out, plotnost_out,Di_out,Ccp_out = Calculate_file.data_frame(input_values["Давление выход, МПа"], input_values["Температура выход, ℃"], gas_composition)
-            q, T = Calculate_file.heat_balance(
-                input_values["Давление вход, МПа"],
-                input_values["Давление выход, МПа"],
-                input_values["Температура вход, ℃"],
-                input_values["Температура выход, ℃"],
-                input_values["Мощность котельной, кВт"],
-                Di_in,
-                Cc_in,
-            )
-
-        except ValueError:
-            self.heat_balance_text.insert(tk.END, "Ошибка: Введите числовые значения.")
-
-        self.heat_balance_text.insert(
-            tk.END, f"Входное давление = {input_values['Давление вход, МПа']}\n"
-        )
-        self.heat_balance_text.insert(
-            tk.END, f"Выходное давление = {input_values['Давление выход, МПа']}\n"
-        )
-        self.heat_balance_text.insert(tk.END, f"Расход = {q}\n")
-        self.heat_balance_text.insert(
-            tk.END, f"Температура после теплообменника = {T}\n"
-        )
-        self.heat_balance_text.insert(
-            tk.END, f"Среднее значение коэффициента Джоуля-Томсона {Di_in}\n"
-        )
-        self.heat_balance_text.config(state="disabled")
-
-class Calculation_pipi:
-    def __init__(self, parent):
-        self.parent = parent["Расчет пропускной способности трубы"]
-        # self.data_model = data_model
-        self.entries = {}
-        self.create_widgets()
-
-    def create_widgets(self):
-        # Кнопка для ввода свойств газа
-        gas_button = WidgetFactory.create_Button(self.parent, "Расчитать", 0)
-
-        # Список меток для полей ввода
-        name_label = [
-            "Давление, Мпа",
-            "Температура, ℃",
-            "Диаметр трубы, мм",
-            "Толщина стенки трубы, мм",
-            "Скорость газа в трубе, м/с",
-            "Количество линий",
-        ]
-        # Создаем метки и поля ввода
-        start_row = 1  # Начинаем с первой строки после кнопки
-        for i, name in enumerate(name_label):
-            label = WidgetFactory.create_label(self.parent, name, start_row + i, 0)
-            entry = WidgetFactory.create_entry(self.parent, start_row + i, 1)
-            self.entries[name] = entry
-
-        # Текстовое поле для вывода результатов
-        self.tube_text = tk.Text(self.parent, height=10, width=50, state="disabled")
-        self.tube_text.grid(
-            row=start_row,
-            column=3,
-            rowspan=len(name_label),
-            padx=10,
-            pady=5,
-            sticky="nsew",
-        )
-
-        # Настройка веса столбцов и строк
-        self.parent.grid_columnconfigure(3, weight=1)
-        for i in range(start_row, start_row + len(name_label)):
-            self.parent.grid_rowconfigure(i, weight=1)
-
-    def calc_tube(self):
-        try:
-            # Получаем входные данные
-            input_values = {}
-            for name, entry in self.entries.items():
-                value = float(entry.get())
-                input_values[name] = value
-
-            # Получаем состав газа
-            gas_composition = self.data_model.data_gas_composition
-
-            # Выполняем расчеты
-            rho_rab, z, plotnost, Di, Ccp = Calculate_file.data_frame(
-                input_values["Давление, Мпа"],
-                input_values["Температура, ℃"],
-                gas_composition,
-            )
-
-            q = Calculate_file.calc(
-                input_values["Диаметр трубы, мм"],
-                input_values["Толщина стенки трубы, мм"],
-                input_values["Давление, Мпа"],
-                input_values["Температура, ℃"],
-                input_values["Скорость газа в трубе, м/с"],
-                input_values["Количество линий"],
-                z,
-            )
-
-            # Обновляем текстовое поле через отдельный метод
-            self.update_tube_text(q, plotnost)
-
-        except ValueError:
-            self.update_tube_text(error_message="Ошибка: Введите числовые значения.")
-
-    def update_tube_text(self, q=None, plotnost=None, error_message=None):
-        """Обновляет текстовое поле с результатами или сообщением об ошибке."""
-        self.tube_text.config(state="normal")
-        self.tube_text.delete("1.0", tk.END)
-
-        if error_message:
-            self.tube_text.insert(tk.END, error_message)
-        else:
-            self.tube_text.insert(tk.END, f"Расход газа: {q:.2f}\n")
-            self.tube_text.insert(tk.END, f"Плотность газа: {plotnost:.4f}\n")
-
-        self.tube_text.config(state="disabled")
 
 
 if __name__ == "__main__":
     filename = logger_config.create_log_file()
     logger = logger_config.setup_logger(filename)
+
     callback = CallbackRegistry()
     data_model = Data_model()
     csvmanager = CSVManager()
-
+    
     root = tk.Tk()
     app = GuiManager(root)
-    gas_composition_manager = Initial_data(
-        app.get_tab_frame(tab_name="Исходные данные"), callback
-    )
+
+
+    guitable = GuiTable(app.get_tab_frame(tab_name="Исходные данные"), callback)
+    initial_data_manager = Initial_data( app.get_tab_frame(tab_name="Исходные данные"), callback)
+    
     data_base_manager = DataBaseManager()
+    
     model = Model(data_model, csvmanager, data_base_manager)
+
+    
+    table_controller = TableController(guitable, callback)
+   
+    controller = Сontroller(initial_data_manager, model, callback,table_controller)
+   
     # gas_properties_manager = Calculation_gas_properties(app.get_tab_frame())
     # tube_properties_manager = Calculation_pipi(app.get_tab_frame())
     # regulatormanager = Calculation_regulator(app.get_tab_frame())
     # heatbalancemanager = Heat_balance(app.get_tab_frame())
 
-    controller = Сontroller(gas_composition_manager, model, callback)
+    
+    
 
     root.mainloop()

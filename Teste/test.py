@@ -35,16 +35,24 @@ import matplotlib.pyplot as plt
 # plt.show()
 
 
-table = {"name":[1,2]}
-# data = [1,2,3,4,5]
-# print(table["name"])
-# print(table["name"][0])
-# for i in data:
-#     print(lambda x=i: print(x))
-# Распаковка ключа
-[yiti] = table
+# table = {"name":[1,2]}
+# # data = [1,2,3,4,5]
+# # print(table["name"])
+# # print(table["name"][0])
+# # for i in data:
+# #     print(lambda x=i: print(x))
+# # Распаковка ключа
+# [yiti] = table
 
-# Получение значения
-value = table[yiti]
+# # Получение значения
+# value = table[yiti]
 
-print(yiti,value)
+# print(yiti,value)
+
+
+stroke = "1.5"
+# get()
+
+a = float(stroke.replace(",","."))
+
+print(a,type(a))
