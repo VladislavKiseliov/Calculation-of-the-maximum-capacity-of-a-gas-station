@@ -101,19 +101,14 @@ class Data_model:
             self.logger.error(f"Не удалось сохранить данные: {e}")
             showwarning("Ошибка", f"Не удалось сохранить данные: {e}")
 
-    def get_table_manager(self)->List[Dict[str, Any]]:
+    @property
+    def table_manager(self)->Dict[str, Any]:
         """Возвращаем название и тип таблиц"""
         return self.tables_data
-
-    def get_data_table(self,name_table) -> List[Dict[str, Any]]: 
-        """Получение данных из базы данных."""
-        with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql_query(f"SELECT * FROM {name_table}", conn)
-            self.logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
-        return df.to_dict(orient="records")[0]  # Список словарей
-
-    def set_tables_data(self, tables: Dict[str,Any]):
-        self.tables_data = tables
+    
+    @table_manager.setter
+    def table_manager(self, tables: Dict[str,Any]):
+        self.tables_data.update(tables)
         print(self.tables_data)
         for i in self.tables_data:
             print(f"{self.tables_data[i].get_table_type()=}")
@@ -233,7 +228,8 @@ class DataBaseManager:
             )
         '''
         self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query}")
-
+        return create_table_query
+    
     def _insert_query(self,colums:List[str],table_name:str) -> str:
         """Create a request to insert data into the table"""
         insert_query = f'''
@@ -241,22 +237,26 @@ class DataBaseManager:
             VALUES ({", ".join(["?"] * len(colums))})
         '''
         self.logger.debug(f"SQL-запрос вставки данных: {insert_query}")
-
+        return insert_query
+    
     def save_data(self, data: Dict[str,List[float]], table_name:str, columns: List[str]):
         """Сохраняет данные из Treeview в базу данных."""
         self.logger.info(f"Начинаем сохранение данных таблицы '{table_name}'")
         try:
             self.logger.debug(f"Данные для сохранения: {data}")
-            
+            print(type(data))
+            print(type(data[0]))
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f"DELETE FROM '{table_name}'")
-                cursor.executemany(f"INSERT INTO '{table_name}' VALUES ({', '.join(['?']*len(columns))})", data)
+                cursor.execute(f"INSERT INTO '{table_name}' VALUES ({', '.join(['?']*len(columns))})", data)
             self.logger.info(f"Данные таблицы '{table_name}' успешно сохранены")
             showinfo("Успех","Данные успешно сохранены")
+        
         except sqlite3.OperationalError as e:
             self.logger.error(f"Ошибка сохранения таблицы '{table_name}': {e}")
             messagebox.showerror("Ошибка", f"Не удалось сохранить таблицу: {e}")
+        
         except Exception as e:
             self.logger.exception(f"Неожиданная ошибка при сохранении таблицы '{table_name}'")
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
@@ -307,6 +307,7 @@ class DataBaseManager:
 
                 # Выполняем создание таблицы
                 self.logger.info(f"Выполняем создание таблицы '{table_name}' в базе данных")
+        
                 cursor.execute(create_table_query)
                 self.logger.debug("Таблица успешно создана или уже существует")
 
@@ -324,6 +325,13 @@ class DataBaseManager:
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
         else:
             self.logger.info(f"Таблица '{table_name}' успешно создана и инициализирована")
+
+    def get_data_table(self,name_table) -> List[Dict[str, Any]]: #убрать оттуда
+        """Получение данных из базы данных."""
+        with sqlite3.connect(self.db_path) as conn:
+            df = pd.read_sql_query(f"SELECT * FROM {name_table}", conn)
+            self.logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
+        return df.to_dict(orient="records")[0]  # Список словарей
 
 class JsonManager:
     def __init__(self):

@@ -5,7 +5,7 @@ import tkinter as tk
 from abc import ABC, abstractmethod
 from tkinter import FALSE, Menu, messagebox, ttk
 from tkinter.messagebox import showwarning
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -34,7 +34,6 @@ class WidgetFactory:
         Button.grid(row=row, column=column, padx=padx, pady=pady, sticky="ew")
         return Button
 
-
 class CallbackRegistry:
     def __init__(self):
         self.callbacks = {}
@@ -49,7 +48,6 @@ class CallbackRegistry:
             self.callbacks[event_name](*args, **kwargs)
         else:
             print(f"Колбэк для события '{event_name}' не зарегистрирован")
-
 
 class GuiManager:
     def __init__(self, root: tk.Tk):
@@ -131,7 +129,6 @@ class GuiManager:
             frame = ttk.Frame(self.notebook)
             self.tabs[name] = frame  # Сохраняем фрейм в словаре
             self.notebook.add(frame, text=name)
-
 
 class Initial_data:
 
@@ -338,8 +335,6 @@ class Initial_data:
             function=lambda: self.callback.trigger("save_pressure_range"),
         )
         
-
-
 class GuiTable:
     
     def __init__(self, parent,callback):
@@ -369,22 +364,12 @@ class GuiTable:
         self.combobox.grid(row=1, column=0, padx=5, pady=5)
 
         # Кнопка добавления таблицы
-        self.save_button = WidgetFactory.create_Button(
+        self.add_table_button = WidgetFactory.create_Button(
             parent=self.table_window,
             label_text="Добавить таблицу",
             row=2,
         )
     
-    def check_table(self):
-        if len(self.tables) == 0:
-            self.create_window_table()
-        else:
-            self.create_window_table()
-            for name in self.tables:
-                self._creating_fields(name,self.table_labels[name].get_table_type())
-
-                self.row += 1
-
     def add_table(self):
         self.selection = self.combobox.get()
         if not self.selection:
@@ -392,9 +377,9 @@ class GuiTable:
             print("Ошибка: Таблица не выбрана!")
             return
         self.row += 1
-        self._creating_fields(self.selection)
+        self.creating_fields(self.selection)
 
-    def _creating_fields(self,table_type,table_name = None):
+    def creating_fields(self,table_type,table_name = None):
         # Метка с названием таблицы
         type_label = WidgetFactory.create_label(
             self.table_window, label_text=table_type, row=self.row
@@ -408,8 +393,10 @@ class GuiTable:
 
         # Кнопка для открытия таблицы
         self.open_button = WidgetFactory.create_Button(
-            self.table_window, "Открыть таблицу", self.row, None, 3
+            self.table_window, "Открыть таблицу", self.row, 
+            lambda: self.callback.trigger("open_table"), 3
         )
+        self.row += 1 
 
     def open_table_window(self, table_name, colomn):
         self.table_name = table_name
@@ -423,7 +410,7 @@ class GuiTable:
             self.tree = ttk.Treeview(window, columns=colomn, show="headings")
             for col in colomn:
                 self.tree.heading(col, text=col)
-                self.tree.insert("", "end", values=["1", "2"])
+                self.tree.insert("", "end", values=["1", "2","3"])
             # self.tree.pack(fill="both", expand=True)
             self.tree.grid(row=0, column=0, sticky="nsew")
             logger.debug("Treeview инициализирован с колонками")
@@ -548,13 +535,17 @@ class TableController:
         self.callback = callback
         self.guitable = guitable
         self.tables = {}
+        
+    def create_window_table(self,tables: Dict[str,BaseTableManager]):
+        if not tables:
+            self.guitable.create_window_table()
+        else:
+            self.guitable.create_window_table()
+            for name in tables:
+                self.guitable.creating_fields(name,tables[name].get_table_type())
 
-        self.callback.register("create_table_window", self.create_window_table)
-
-    def create_window_table(self):
-        self.guitable.check_table()
-        self.guitable.save_button.configure(command=self._add_table)
-
+        self.guitable.add_table_button.configure(command=self._add_table)
+ 
     def _add_table(self):
         self.guitable.add_table()
         # print(f"{self.guitable.entry_name_table.get()=}")
@@ -573,7 +564,8 @@ class TableController:
             return
         manager = TableFactory.create_table_manager(table_type)
         self.tables[table_name] = manager
-
+        
+    
     def open_table(self, table_name, table_type):
         if table_name not in self.tables:
             self.create_table(table_name, table_type)
@@ -587,7 +579,7 @@ class TableController:
 
 class Сontroller:
     def __init__(
-        self, initial_data: Initial_data, model: "Model", callback: CallbackRegistry,table_controller):
+        self, initial_data: Initial_data, model: "Model", callback: CallbackRegistry,table_controller:TableController):
         self.logger = logging.getLogger("App.Сontroller")  # Дочерний логгер
         self.callback = callback
         self.initial_data = initial_data
@@ -628,7 +620,8 @@ class Сontroller:
         )
 
         self.callback.register("save_table",self.save_table)
-        
+        self.callback.register("create_table_window", self.create_table)
+
     def setup_button_pressure(self, title):  # Функция для создание диапазона входных и выходных давлений
         self.initial_data.create_window_pressure(title)  # Создаем окно
         # # Загрузка предыдущих значений
@@ -681,10 +674,24 @@ class Сontroller:
             data[component] = entries[component].get()
             print(f"{entries[component].get()=}")
 
+
+    def create_table(self):
+        tables = self.model.get_table_manager()
+        self.table_controller.create_window_table(tables)
+
+
     def save_table(self):
+        print(self.table_controller.tables)
         data = self.table_controller.get_table_data()
-        print(f"{data=}")
-        self.model.data_table(data)
+        [table_name] = data
+        if table_name in self.table_controller.tables:
+            print(f"{data=}")
+            print(f"{data[table_name]=}")
+            print(f"{table_name=}")
+            print(f"{self.table_controller.tables[table_name].get_columns()=}")
+            self.model.create_db_table(table_name,self.table_controller.tables[table_name].get_columns(),data[table_name])
+
+        # self.model.data_table(data)
 
 class Model:
     def __init__(
@@ -757,17 +764,12 @@ class Model:
     def load_gaz_from_csv(self):  # Исправить на класс работы с csv
         self.data_model.load_gas_composition_from_csv()
 
-    def data_table(self, data):
-        # Проверяем, что словарь не пуст
-        if not data:
-            print("Словарь пуст!")
-            return
-        # Получаем ключ и список из словаря
-        key, data1 = next(
-            iter(data.items())
-        )  # Берем первую (и единственную) пару ключ-значение
-        self.data_base_manager.create_table(key, ["1", "2"])
-        # self.data_base_manager.save_data(data1, key, ["1", "2"])
+    def get_table_manager(self)-> Dict[str, BaseTableManager]:
+        return self.data_model.table_manager
+
+    def create_db_table(self,table_name,columns,data):
+        self.data_base_manager.create_table(table_name,columns)
+        self.data_base_manager.save_data(data,table_name,columns)
 
 
 
