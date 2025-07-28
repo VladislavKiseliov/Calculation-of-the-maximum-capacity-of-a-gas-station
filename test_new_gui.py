@@ -2,18 +2,15 @@ import contextlib
 import logging
 import math
 import tkinter as tk
-from abc import ABC, abstractmethod
 from tkinter import FALSE, Menu, messagebox, ttk
-from tkinter.messagebox import showwarning
-from typing import Any, Dict, List
+from typing import Dict, List
 
-import numpy as np
-
-import Calculate_file
 import logger_config
-from DataModel import CSVManager, Data_model, DataBaseManager
-from wigets import WidgetFactory
-from Tab_calculate import Calculation_gas_properties,Calculation_regulator,Heat_balance,Calculation_pipi
+from DataModel import CSVManager, Data_model, DataBaseManager, DataStorage, JsonManager
+from Work_table import BaseTableManager, TableFactory
+from calculate_Max_performance import Max_performance 
+
+
 
 class WidgetFactory:
     @staticmethod
@@ -139,7 +136,6 @@ class Initial_data:
         self.entries = {}  # Словарь хранения данных
         self.callbacks = {}  # Хранилище для колбэков
 
-    
     def create_wigets(self):
         self.gas_button = WidgetFactory.create_Button(
             self.parent,
@@ -151,7 +147,7 @@ class Initial_data:
             parent=self.parent,
             label_text="Температура газа",
             row=2,
-            function=self.create_window_temperature,
+            function=lambda: self.callback.trigger("create_window_temperature")
         )
         self.input_pressure = WidgetFactory.create_Button(
             parent=self.parent,
@@ -174,9 +170,9 @@ class Initial_data:
             ),
         )
         self.calculate_button = WidgetFactory.create_Button(
-            self.parent, label_text="Автоматический расчет", row=6
+            self.parent, label_text="Автоматический расчет", row=6,function=lambda: self.callback.trigger("Расчет")
         )
-        self.calculate_button.config(state="disabled")
+        # self.calculate_button.config(state="disabled")
 
     def create_window_sostav_gaz(self, data: Dict[str, float]):
         # Окно для ввода состава газа
@@ -285,29 +281,23 @@ class Initial_data:
         """Открывает диалог для ввода температур."""
         # data: Dict[str, float]
         self.temperature_entries = {}
-        pressure_window = tk.Toplevel(self.parent)
-        pressure_window.attributes("-topmost", True)
-        pressure_window.title("Температурный режим")
+        self.temp_window = tk.Toplevel(self.parent)
+        self.temp_window.attributes("-topmost", True)
+        self.temp_window.title("Температурный режим")
 
         for idx, (title, label_text) in enumerate(
             [("input", "Температура на входе"), ("output", "Температура на выходе")]
         ):
             WidgetFactory.create_label(
-                parent=pressure_window, label_text=label_text, row=idx
+                parent=self.temp_window, label_text=label_text, row=idx
             )
-            entry = WidgetFactory.create_entry(parent=pressure_window, row=idx)
-            self.temperature_entries[title] = entry  # Сохраняем Entry по имени
+            entry = WidgetFactory.create_entry(parent=self.temp_window, row=idx)
+            self.temperature_entries[title] = entry  # Сохраняем Entry по имен
 
-        # # temperature = self.data_model.get_temperature()
-        # print(f"{temperature=}")
-        # if temperature:
-        #     # min_pressure_entry.insert(0, min(pressure_range))
-
-        #     self.entries_dict["input"].insert(0,temperature['in'])
-        #     self.entries_dict["output"].insert(0,temperature['out'])
-
-        self.save_button = WidgetFactory.create_Button(
-            pressure_window, label_text="Сохранить", row=3
+        save_temperature_button = WidgetFactory.create_Button(
+            parent=self.temp_window,
+            label_text="Сохранить", row=3,
+            function=lambda: self.callback.trigger("save_temperature")
         )
 
     def create_window_pressure(self, title):
@@ -332,11 +322,11 @@ class Initial_data:
             parent=self.pressure_window,
             label_text="Сохранить",
             row=4,
-            function=lambda: self.callback.trigger("save_pressure_range"),
+            function=lambda: self.callback.trigger("save_pressure_range")
         )
         
 class GuiTable:
-    
+
     def __init__(self, parent,callback):
         self.parent = parent
         self.callback = callback
@@ -368,6 +358,8 @@ class GuiTable:
             parent=self.table_window,
             label_text="Добавить таблицу",
             row=2,
+            function=self.add_table
+            
         )
     
     def add_table(self):
@@ -393,15 +385,27 @@ class GuiTable:
 
         # Кнопка для открытия таблицы
         self.open_button = WidgetFactory.create_Button(
-            self.table_window, "Открыть таблицу", self.row, 
-            lambda: self.callback.trigger("open_table"), 3
-        )
+        self.table_window,
+        "Открыть таблицу",
+        self.row,
+        lambda e=self.entry_name_table: self.callback.trigger(
+            "open_table", 
+            name=e.get(), 
+            table_type=table_type
+        ),
+        3
+    )
         self.row += 1 
 
-    def open_table_window(self, table_name, colomn):
+    def open_table_window(self, table_name,data = None):
         self.table_name = table_name
         """Открывает окно с таблицей."""
         logger.info(f"Открытие окна таблицы '{self.table_name}'")
+        colomn = list(data.keys())
+        col_values = list(data.values())
+        init_data = col_values if data is not None else ["-"] * len(colomn)
+        print(f"{data=}")
+        
         try:
             window = tk.Toplevel(self.parent)
             window.title(f"Таблица: {self.table_name}")
@@ -410,7 +414,7 @@ class GuiTable:
             self.tree = ttk.Treeview(window, columns=colomn, show="headings")
             for col in colomn:
                 self.tree.heading(col, text=col)
-                self.tree.insert("", "end", values=["1", "2","3"])
+            self.tree.insert("", "end", values=init_data)
             # self.tree.pack(fill="both", expand=True)
             self.tree.grid(row=0, column=0, sticky="nsew")
             logger.debug("Treeview инициализирован с колонками")
@@ -419,8 +423,7 @@ class GuiTable:
 
             self.save_data_button = ttk.Button(window, text="Сохранить данные",command= lambda: self.callback.trigger("save_table"))
 
-            # self.save_button.pack(pady=10)
-            # Замените pack на grid для кнопки
+            
             self.save_data_button.grid(row=1, column=0, pady=10, sticky="ew")
             logger.debug("Кнопка сохранения добавлена в окно")
 
@@ -434,7 +437,7 @@ class GuiTable:
     def _add_editing_features(self, event):
         """Обработка двойного клика для редактирования ячейки."""
         # Получаем выбранную строку и столбец
-        print(123)
+
         region = self.tree.identify_region(event.x, event.y)
         if region != "cell":
             return
@@ -474,86 +477,30 @@ class GuiTable:
             ][0]
         }
 
-class BaseTableManager(ABC):
-    def __init__(self, table_type):
-        self.table_type = table_type
-
-    @abstractmethod
-    def get_columns(self) -> list:
-        pass
-
-    def get_table_type(self) -> str:
-        return self.table_type
-
-class RegulatorTableManager(BaseTableManager):
-    def get_columns(self):
-        return ["regulator", "kv", "lines_count"]
-
-class BoilerTableManager(BaseTableManager):
-    def get_columns(self):
-        return ["boiler_power", "gas_temp_in", "gas_temp_out"]
-
-class PipeTableManager(BaseTableManager):
-    def get_columns(self):
-        return [
-            "pipe_diameter",
-            "wall_thickness",
-            "gas_speed",
-            "gas_temperature",
-            "lines_count",
-        ]
-
-class TableFactory:
-    @staticmethod
-    def create_table_manager(table_type):
-        logger = logging.getLogger("App.TableFactory")  # Дочерний логгер
-        logger.info(f"Запрос на создание менеджера таблицы типа: '{table_type}'")
-
-        match table_type:
-            case "Таблица для регуляторов":
-                logger.info("Создан менеджер таблицы регуляторов")
-                return RegulatorTableManager(table_type)
-
-            case "Таблица котельной":
-                logger.info("Создан менеджер таблицы котельной")
-                return BoilerTableManager(table_type)
-
-            case "Таблицы для труб до регулятора" | "Таблицы для труб после регулятора":
-                logger.info(f"Создан менеджер таблицы труб: {table_type}")
-                return PipeTableManager(table_type)
-
-            case _:
-                error_msg = f"Неизвестный тип таблицы: {table_type}"
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-
-
 class TableController:
 
-    def __init__(self, guitable: GuiTable, callback: CallbackRegistry):
+    def __init__(self, guitable: GuiTable, callback: CallbackRegistry, model : "Data_model"):
         self.logger = logging.getLogger("App.TableController")  # Дочерний логгер
         self.callback = callback
         self.guitable = guitable
+        self.model = model
         self.tables = {}
         
     def create_window_table(self,tables: Dict[str,BaseTableManager]):
+        print(f"{tables=}")
         if not tables:
             self.guitable.create_window_table()
         else:
             self.guitable.create_window_table()
             for name in tables:
-                self.guitable.creating_fields(name,tables[name].get_table_type())
+                print(f"{tables=}")
+                print(f"{tables[name]=}")
+                print(f"{(tables[name])=}")
+                self.guitable.creating_fields(tables[name].get_table_type(),name)
 
-        self.guitable.add_table_button.configure(command=self._add_table)
- 
-    def _add_table(self):
-        self.guitable.add_table()
-        # print(f"{self.guitable.entry_name_table.get()=}")
-        self.guitable.open_button.configure(
-            command=lambda e=self.guitable.entry_name_table, s=self.guitable.selection: self.open_table(e.get(), s)
-        )
 
     def create_table(self, table_name, table_type):
+
         if table_name == "":
             messagebox.showwarning("Ошибка", "Введите название таблицы")
             return
@@ -564,31 +511,46 @@ class TableController:
             return
         manager = TableFactory.create_table_manager(table_type)
         self.tables[table_name] = manager
+        data = {table_name:manager}
+        self.model.save_table(data)
+        self.model.create_db_table(table_name,self.tables[table_name].get_columns())
+   
         
-    
-    def open_table(self, table_name, table_type):
+    def open_table(self,name, table_type):
+        table_name = name
+       
         if table_name not in self.tables:
             self.create_table(table_name, table_type)
-        self.guitable.open_table_window(
-            table_name, self.tables[table_name].get_columns()
-        )
-    
+                
+        data = self.model.get_table_data(table_name)
+        self.guitable.open_table_window(table_name, data)
+ 
+
+    def save_table(self):
+        data = self.get_table_data()
+        [table_name] = data
+        if table_name in self.tables:
+
+            self.model.save_db_table(table_name,self.tables[table_name].get_columns(),data)
+
+
     def get_table_data(self) -> Dict[str, List[float]]:
         return self.guitable.get_data_table()
 
-
 class Сontroller:
     def __init__(
-        self, initial_data: Initial_data, model: "Model", callback: CallbackRegistry,table_controller:TableController):
+        self, initial_data: Initial_data, model: "Data_model", callback: CallbackRegistry,table_controller:TableController,max_performance):
         self.logger = logging.getLogger("App.Сontroller")  # Дочерний логгер
         self.callback = callback
         self.initial_data = initial_data
         self.table_controller = table_controller
         self.model = model
+        self.max_performance = max_performance
         self.logger.info("Контроллер работает")
         self._register_callback()
 
     def _register_callback(self):
+        # Колбек на открытия меню входного и выходного давления
         self.callback.register(
             "save_gas_composition", self.gaz_window
         )  # "Сохранить состав газа"
@@ -597,7 +559,7 @@ class Сontroller:
             self.callback.register(
                 f"{pressure_type}_pressure",
                 lambda pt=pressure_type: self.setup_button_pressure(pt),
-            )  # Колбек на открытия меню входного и выходного давления
+            )  
 
         self.callback.register(
             "save_gas_composition_to_csv",
@@ -607,7 +569,7 @@ class Сontroller:
         )  # Колбек сохранения состава газа из csv
 
         self.callback.register(
-            "load_gas_composition_to_csv", self.model.load_gaz_from_csv
+            "load_gas_composition_to_csv", self.load_sostav_gaz_csv
         )  # Колбэк на загрузку данных из csv
 
         self.callback.register(
@@ -619,15 +581,25 @@ class Сontroller:
             lambda: self.save_temperature(self.initial_data.temperature_entries),
         )
 
-        self.callback.register("save_table",self.save_table)
+        self.callback.register("save_table",self.table_controller.save_table)
         self.callback.register("create_table_window", self.create_table)
 
+        self.callback.register("save_temperature",lambda: self.save_temperature(self.initial_data.temperature_entries)
+        )
+        self.callback.register("create_window_temperature",self.create_window_temperature)
+
+        self.callback.register("open_table",self.table_controller.open_table)
+        
+        self.callback.register("Расчет",self.max_performance.result)
+
     def setup_button_pressure(self, title):  # Функция для создание диапазона входных и выходных давлений
+
         self.initial_data.create_window_pressure(title)  # Создаем окно
-        # # Загрузка предыдущих значений
-        if pressure_range := getattr(
-            self.model.data_model, f"get_{title.lower()}_pressure_range"
-        )():
+        print(self.model.get_pressure_range(title))
+
+        # Загрузка предыдущих значений
+        if pressure_range := self.model.get_pressure_range(title):
+            print(f"{pressure_range=}")
             self.initial_data.pressure_entries["Минимальное давление:"].insert(
                 0, min(pressure_range)
             )
@@ -644,7 +616,7 @@ class Сontroller:
     def save_pressure(self):
         self.model.save_pressure_range1(
             self.initial_data.title,  # Передаем title
-                self.initial_data.pressure_entries,  # Передаем поля для ввода
+            self.initial_data.pressure_entries,  # Передаем поля для ввода
             )
         self.initial_data.pressure_window.destroy() #Закрывает окно при успешном сохранении
 
@@ -663,147 +635,75 @@ class Сontroller:
         model.save_sostav_gaz(data)
 
         if to_csv:  # Для сохранения в csv
-            self.model.save_gaz_to_csv()
+            self.model.save_gaz_to_csv(data)
 
         self.initial_data.gas_window.destroy() #Закрывает окно при успешном сохранении
 
+    def load_sostav_gaz_csv(self):
+        data = self.model.load_gaz_from_csv()
+        print(f"{data=}")
+        for component, entry in self.initial_data.entries.items():
+            if component in data:
+                entry.delete(0, tk.END)
+                entry.insert(0, str(data[component]))
+                self.initial_data.update_total_percentage()
+    
+    def create_window_temperature(self):
+        self.initial_data.create_window_temperature()
+        if temperature := self.model.get_temperature():
+
+            self.initial_data.temperature_entries["input"].insert(
+                0, temperature["input"]
+            )
+            self.initial_data.temperature_entries["output"].insert(
+                0, temperature["output"]
+            )
+
     def save_temperature(self, entries: Dict[str, tk.Entry]):
         data = {}
-
         for component in entries:
-            data[component] = entries[component].get()
-            print(f"{entries[component].get()=}")
+            data[component] = float(entries[component].get())
+        
+        self.model.save_temp(data)
+        self.initial_data.temp_window.destroy()
 
-
+    
     def create_table(self):
         tables = self.model.get_table_manager()
         self.table_controller.create_window_table(tables)
 
+    
 
-    def save_table(self):
-        print(self.table_controller.tables)
-        data = self.table_controller.get_table_data()
-        [table_name] = data
-        if table_name in self.table_controller.tables:
-            print(f"{data=}")
-            print(f"{data[table_name]=}")
-            print(f"{table_name=}")
-            print(f"{self.table_controller.tables[table_name].get_columns()=}")
-            self.model.create_db_table(table_name,self.table_controller.tables[table_name].get_columns(),data[table_name])
-
-        # self.model.data_table(data)
-
-class Model:
-    def __init__(
-        self, data_model: Data_model, csvmanager: CSVManager, data_base: DataBaseManager
-    ):
-        self.data_model = data_model
-        self.data_base_manager = data_base
-
-    def _calculate_pressure_range(
-        self, min_pressure, max_pressure, average_value
-    ) -> List[float]:
-        try:
-            # Проверка корректности данных
-            if min_pressure > max_pressure:
-                raise ValueError("Ошибка: Минимальное давление больше максимального.")
-            if average_value <= 0:
-                raise ValueError("Ошибка: Шаг должен быть положительным числом.")
-
-            pressure_range = np.arange(
-                min_pressure, max_pressure + average_value, average_value
-            ).tolist()
-            return [round(p, 1) for p in pressure_range]
-
-        except ValueError as e:
-            # Вывод ошибки
-            showwarning("Ошибка", e)
-            return
-
-    def save_pressure_range1(self, title: str, pressure_entries: Dict[str, ttk.Entry]):
-        """
-        Сохраняет диапазон давлений.
-        """
-        # Преобразуем входные данные в числа
-        min_pressure = float(pressure_entries["Минимальное давление:"].get())
-        max_pressure = float(pressure_entries["Максимальное давление:"].get())
-        avg_value = float(pressure_entries["Шаг значения"].get())
-
-        if not all([min_pressure, max_pressure, avg_value]):
-            raise ValueError("Ошибка: Введите значения")
-
-        try:
-            pressure_type = title.lower()
-            set_pressure_range = self._calculate_pressure_range(
-                min_pressure, max_pressure, avg_value
-            )
-
-            print(f"{set_pressure_range=}")
-            self.data_model.set_pressure_range(pressure_type, set_pressure_range)
-
-            logger.info(
-                f"Диапазоны {pressure_type} давления  успешно сохранены: максимальное = %s мПа, минимальное = %s мПа,шаг = %s",
-                max_pressure,
-                min_pressure,
-                avg_value,
-            )
-        except ValueError:
-            logger.warning("Введите корректные числовые значения!")
-            showwarning("Ошибка", "Введите корректные числовые значения!")
-
-    def load_gas_composition(self):
-        """Loads the gas composition from the data model and updates the entry fields."""
-        return self.data_model.data_gas_composition
-
-    def save_sostav_gaz(self, data):
-        self.data_model.data_gas_composition = data
-
-    def save_gaz_to_csv(self):  # Исправить на класс работы с csv
-        self.data_model.save_gas_composition_to_csv()
-
-    def load_gaz_from_csv(self):  # Исправить на класс работы с csv
-        self.data_model.load_gas_composition_from_csv()
-
-    def get_table_manager(self)-> Dict[str, BaseTableManager]:
-        return self.data_model.table_manager
-
-    def create_db_table(self,table_name,columns,data):
-        self.data_base_manager.create_table(table_name,columns)
-        self.data_base_manager.save_data(data,table_name,columns)
-
-
-
+def test():
+    print("бубубуб")
+    root.after(500, test)
 
 if __name__ == "__main__":
     filename = logger_config.create_log_file()
     logger = logger_config.setup_logger(filename)
 
     callback = CallbackRegistry()
-    data_model = Data_model()
+
+    # Инициализируем объекты для работы с даннмы и файлами разных форматов 
+    
     csvmanager = CSVManager()
+    data_base_manager = DataBaseManager()
+    json_manager = JsonManager()
+    data_storage = DataStorage()
+    model = Data_model(data_storage, csvmanager, data_base_manager,json_manager)
     
     root = tk.Tk()
     app = GuiManager(root)
-
-
     guitable = GuiTable(app.get_tab_frame(tab_name="Исходные данные"), callback)
     initial_data_manager = Initial_data( app.get_tab_frame(tab_name="Исходные данные"), callback)
-    
-    data_base_manager = DataBaseManager()
-    
-    model = Model(data_model, csvmanager, data_base_manager)
+    max_performance = Max_performance(model)
 
-    
-    table_controller = TableController(guitable, callback)
-   
-    controller = Сontroller(initial_data_manager, model, callback,table_controller)
-   
+    table_controller = TableController(guitable, callback,model)
+    controller = Сontroller(initial_data_manager, model, callback,table_controller,max_performance)
     # gas_properties_manager = Calculation_gas_properties(app.get_tab_frame())
     # tube_properties_manager = Calculation_pipi(app.get_tab_frame())
     # regulatormanager = Calculation_regulator(app.get_tab_frame())
     # heatbalancemanager = Heat_balance(app.get_tab_frame())
-
+    # root.after(500, test)  #для запуска паралельной проверке для активации кнопки расчета
     
-    
-
     root.mainloop()
