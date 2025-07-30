@@ -4,6 +4,9 @@ import math
 import tkinter as tk
 from tkinter import FALSE, Menu, messagebox, ttk
 from typing import Dict, List
+import pandas as pd
+
+from matplotlib import table
 
 import logger_config
 from DataModel import CSVManager, Data_model, DataBaseManager, DataStorage, JsonManager
@@ -47,7 +50,8 @@ class CallbackRegistry:
             print(f"Колбэк для события '{event_name}' не зарегистрирован")
 
 class GuiManager:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk,callback: CallbackRegistry):
+        self.callback = callback
         self.root = root
         self.style = ttk.Style(root)
         self._create_menu()
@@ -69,8 +73,8 @@ class GuiManager:
         main_menu = Menu()
 
         file_menu = Menu()
-        file_menu.add_command(label="Save")
-        file_menu.add_command(label="Open")
+        file_menu.add_command(label="Save", command=lambda: self.callback.trigger("Save_file"))
+        file_menu.add_command(label="Open", command=lambda: self.callback.trigger("Load_file"))
         file_menu.add_separator()
         file_menu.add_command(label="Exit")
 
@@ -331,7 +335,7 @@ class GuiTable:
         self.parent = parent
         self.callback = callback
         self.row = 3
-        self.tables = {}  # Хранит все таблицы: {"table_name": manager}
+        self.tables = {}  # Храним имя открытой таблицы
         self.table_labels = [
             "Таблица для регуляторов",
             "Таблица котельной",
@@ -397,21 +401,25 @@ class GuiTable:
     )
         self.row += 1 
 
-    def open_table_window(self, table_name,data = None):
+    def open_table_window(self, table_name,colomn,data):
         self.table_name = table_name
         """Открывает окно с таблицей."""
         logger.info(f"Открытие окна таблицы '{self.table_name}'")
-        colomn = list(data.keys())
-        col_values = list(data.values())
-        init_data = col_values if data is not None else ["-"] * len(colomn)
+
+ 
+        if data is not None:
+            init_data = list(data.values())
+        else:
+            init_data = ["-"] * len(colomn)
+
         print(f"{data=}")
         
         try:
-            window = tk.Toplevel(self.parent)
-            window.title(f"Таблица: {self.table_name}")
+            self.window_table = tk.Toplevel(self.parent)
+            self.window_table .title(f"Таблица: {self.table_name}")
             logger.debug(f"Создано новое окно для таблицы '{self.table_name}'")
 
-            self.tree = ttk.Treeview(window, columns=colomn, show="headings")
+            self.tree = ttk.Treeview(self.window_table , columns=colomn, show="headings")
             for col in colomn:
                 self.tree.heading(col, text=col)
             self.tree.insert("", "end", values=init_data)
@@ -421,7 +429,7 @@ class GuiTable:
 
             logger.debug("Данные загружены в Treeview")
 
-            self.save_data_button = ttk.Button(window, text="Сохранить данные",command= lambda: self.callback.trigger("save_table"))
+            self.save_data_button = ttk.Button(self.window_table , text="Сохранить данные",command= lambda: self.callback.trigger("save_table"))
 
             
             self.save_data_button.grid(row=1, column=0, pady=10, sticky="ew")
@@ -471,6 +479,7 @@ class GuiTable:
 
     def get_data_table(self) -> Dict[str, List[float]]:
         print([self.tree.item(item)["values"] for item in self.tree.get_children()][0])
+
         return {
             self.table_name: [
                 self.tree.item(item)["values"] for item in self.tree.get_children()
@@ -487,15 +496,11 @@ class TableController:
         self.tables = {}
         
     def create_window_table(self,tables: Dict[str,BaseTableManager]):
-        print(f"{tables=}")
         if not tables:
             self.guitable.create_window_table()
         else:
             self.guitable.create_window_table()
             for name in tables:
-                print(f"{tables=}")
-                print(f"{tables[name]=}")
-                print(f"{(tables[name])=}")
                 self.guitable.creating_fields(tables[name].get_table_type(),name)
 
 
@@ -513,30 +518,25 @@ class TableController:
         self.tables[table_name] = manager
         data = {table_name:manager}
         self.model.save_table(data)
-        self.model.create_db_table(table_name,self.tables[table_name].get_columns())
    
-        
     def open_table(self,name, table_type):
         table_name = name
        
         if table_name not in self.tables:
             self.create_table(table_name, table_type)
-                
         data = self.model.get_table_data(table_name)
-        self.guitable.open_table_window(table_name, data)
+        self.guitable.open_table_window(table_name,self.tables[table_name].get_columns(),data)
  
-
     def save_table(self):
-        data = self.get_table_data()
-        [table_name] = data
-        if table_name in self.tables:
+       """Saving the original table data to the database"""
 
-            self.model.save_db_table(table_name,self.tables[table_name].get_columns(),data)
-
-
-    def get_table_data(self) -> Dict[str, List[float]]:
-        return self.guitable.get_data_table()
-
+       table_data = self.guitable.get_data_table() 
+       table_name, values = next(iter(table_data.items()))
+       columns = self.tables[table_name].get_columns() 
+       data = dict(zip(columns, values))
+       self.model.create_db_table(table_name,self.tables[table_name].get_table_type(), data)
+       self.guitable.window_table.destroy()
+       
 class Сontroller:
     def __init__(
         self, initial_data: Initial_data, model: "Data_model", callback: CallbackRegistry,table_controller:TableController,max_performance):
@@ -590,7 +590,11 @@ class Сontroller:
 
         self.callback.register("open_table",self.table_controller.open_table)
         
-        self.callback.register("Расчет",self.max_performance.result)
+        self.callback.register("Расчет",self.calculate)
+
+        self.callback.register("Save_file",self.model.export_config)
+        self.callback.register("Load_file",self.model.import_config)
+       
 
     def setup_button_pressure(self, title):  # Функция для создание диапазона входных и выходных давлений
 
@@ -614,9 +618,14 @@ class Сontroller:
             "save_pressure_range",self.save_pressure)  # Привязываю функцию для сохранение диапазона давлениея
 
     def save_pressure(self):
+        # Преобразуем входные данные в числа
+        min_pressure = float(self.initial_data.pressure_entries["Минимальное давление:"].get())
+        max_pressure = float(self.initial_data.pressure_entries["Максимальное давление:"].get())
+        step = float(self.initial_data.pressure_entries["Шаг значения"].get())
+
         self.model.save_pressure_range1(
             self.initial_data.title,  # Передаем title
-            self.initial_data.pressure_entries,  # Передаем поля для ввода
+            min_pressure,max_pressure,step    # Передаем поля для ввода
             )
         self.initial_data.pressure_window.destroy() #Закрывает окно при успешном сохранении
 
@@ -667,11 +676,33 @@ class Сontroller:
         self.model.save_temp(data)
         self.initial_data.temp_window.destroy()
 
-    
     def create_table(self):
         tables = self.model.get_table_manager()
         self.table_controller.create_window_table(tables)
 
+    def calculate(self):
+        input_pressure = self.model.get_pressure_range("input") #Диапазон входного давления
+        output_pressure = self.model.get_pressure_range("output") #Диапазон выходного давления
+        tables = self.model.get_table_manager() # Названия таблиц
+        temperature = self.model.get_temperature()
+        gas_composition = self.model.load_gas_composition()
+        tables_data ={}
+        for table_name in tables:
+            tables_data[table_name] = self.model.get_table_data(table_name)
+        
+
+        for P_out in output_pressure:
+            df = self.max_performance.calculate(input_pressure,
+                                       P_out,
+                                       tables,
+                                       temperature,
+                                       gas_composition,
+                                       tables_data)    
+            print(df)
+            self.model.save_intermedia(df,f"Промежуточный результат для P_out={P_out}")
+        
+        
+        pass
     
 
 def test():
@@ -693,10 +724,11 @@ if __name__ == "__main__":
     model = Data_model(data_storage, csvmanager, data_base_manager,json_manager)
     
     root = tk.Tk()
-    app = GuiManager(root)
+    app = GuiManager(root, callback)
     guitable = GuiTable(app.get_tab_frame(tab_name="Исходные данные"), callback)
     initial_data_manager = Initial_data( app.get_tab_frame(tab_name="Исходные данные"), callback)
-    max_performance = Max_performance(model)
+
+    max_performance = Max_performance()
 
     table_controller = TableController(guitable, callback,model)
     controller = Сontroller(initial_data_manager, model, callback,table_controller,max_performance)

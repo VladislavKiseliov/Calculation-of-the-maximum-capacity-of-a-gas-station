@@ -19,7 +19,7 @@ class BaseTableManager(ABC):
 
 class RegulatorTableManager(BaseTableManager):
     def get_columns(self):
-        return ["regulator", "kv", "lines_count"]
+        return [ "kv", "lines_count"]
 
 class BoilerTableManager(BaseTableManager):
     def get_columns(self):

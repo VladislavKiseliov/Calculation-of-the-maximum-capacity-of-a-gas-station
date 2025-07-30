@@ -1,3 +1,4 @@
+import base64
 import csv
 import json
 import logging
@@ -7,6 +8,7 @@ import tkinter as ttk
 from tkinter import filedialog, messagebox
 from tkinter.messagebox import showinfo, showwarning
 from typing import Any, Dict, List
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -21,25 +23,27 @@ class Data_model:
     pressure ranges, table data, and gas properties.
     """
 
-    def __init__(self, data_storage, csvmanager, data_base, json_manager):
+    def __init__(self, data_storage : "DataStorage", csvmanager:"CSVManager", data_base :"DataBaseManager", json_manager:"JsonManager"):
+        
         self.logger = logging.getLogger("App.DataModel")  # Дочерний логгер
         self.data_storage = data_storage
         self.csv_manager = csvmanager
         self.data_base_manager = data_base
         self.json_manager = json_manager
+        self.saves_dir = "Saves"
 
+    # Раюота с давлением
     def _calculate_pressure_range(
-        self, min_pressure, max_pressure, average_value
-    ) -> List[float]:
+        self, min_pressure:float,max_pressure:float,step:float) -> List[float]:
         try:
             # Проверка корректности данных
             if min_pressure > max_pressure:
                 raise ValueError("Ошибка: Минимальное давление больше максимального.")
-            if average_value <= 0:
+            if step <= 0:
                 raise ValueError("Ошибка: Шаг должен быть положительным числом.")
 
             pressure_range = np.arange(
-                min_pressure, max_pressure + average_value, average_value
+                min_pressure, max_pressure + step, step
             ).tolist()
             return [round(p, 1) for p in pressure_range]
 
@@ -48,32 +52,25 @@ class Data_model:
             showwarning("Ошибка", e)
             return
 
-    def save_pressure_range1(self, title: str, pressure_entries: Dict[str, ttk.Entry]):
+    def save_pressure_range1(self, title: str, min_pressure:float,max_pressure:float,step:float):
         """
         Сохраняет диапазон давлений.
         """
-        # Преобразуем входные данные в числа
-        min_pressure = float(pressure_entries["Минимальное давление:"].get())
-        max_pressure = float(pressure_entries["Максимальное давление:"].get())
-        avg_value = float(pressure_entries["Шаг значения"].get())
-
-        if not all([min_pressure, max_pressure, avg_value]):
+        if not all([min_pressure, max_pressure, step]):
             raise ValueError("Ошибка: Введите значения")
-
         try:
             pressure_type = title.lower()
             set_pressure_range = self._calculate_pressure_range(
-                min_pressure, max_pressure, avg_value
+                min_pressure, max_pressure, step
             )
-
-            print(f"{set_pressure_range=}")
+            
             self.data_storage.set_pressure_range(pressure_type, set_pressure_range)
 
             self.logger.info(
                 f"Диапазоны {pressure_type} давления  успешно сохранены: максимальное = %s мПа, минимальное = %s мПа,шаг = %s",
                 max_pressure,
                 min_pressure,
-                avg_value,
+                step,
             )
         except ValueError:
             self.logger.warning("Введите корректные числовые значения!")
@@ -90,33 +87,52 @@ class Data_model:
             else self.data_storage.get_output_pressure_range()
         )
 
+    # Работа с составом газа
     def load_gas_composition(self)-> Dict[str, float]:
         """Loads the gas composition from the data model and updates the entry fields."""
         return self.data_storage.data_gas_composition
 
-    def save_sostav_gaz(self, data):
-        self.data_storage.data_gas_composition = data
+    def validate_gaz_composition(self, composition: Dict[str, str]) -> Dict[str, float]:
+        total_percentage = 0.0
+        gas_composition = {}  # Очищаем словарь, что бы не накладывало значения
+        for component, percentage in composition.items():
+            try:
+                percentage = float(percentage)
+                if percentage < 0:
+                    raise ValueError("Отрицательное значение")
+                gas_composition[component] = percentage
+                total_percentage += percentage
+            except ValueError:
+                gas_composition[component] = (
+                    0.0  # Если введено неверное значение, считаем 0%
+                )
 
-    def save_gaz_to_csv(self, data):  # Исправить на класс работы с csv
-        self.csv_manager.save_gas_composition_to_csv(data)
+        # Проверяем, что сумма процентов равна 100%
+        if abs(total_percentage - 100.0) > 0.001:  # Допускаем небольшую погрешность
+            print(f"{abs(total_percentage - 100.0)=}")
+            self.logger.error(
+                "Ошибка",
+                f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%",
+            )
+            showwarning(
+                "Ошибка",
+                f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%",
+            )
+            return
+        return gas_composition
+
+    def save_sostav_gaz(self,  composition: Dict[str, str]):
+        gas_composition = self.validate_gaz_composition(composition)
+        self.data_storage.data_gas_composition = gas_composition
+
+    def save_gaz_to_csv(self, composition: Dict[str, str]):  # Исправить на класс работы с csv
+        gas_composition = self.validate_gaz_composition(composition)
+        self.csv_manager.save_gas_composition_to_csv(gas_composition)
 
     def load_gaz_from_csv(self):  # Исправить на класс работы с csv
         return self.csv_manager.load_gas_composition_from_csv()
 
-    def get_table_manager(self) -> Dict[str, BaseTableManager]:
-        """def get_table_manager(self)-> Dict[str, BaseTableManager]"""
-        return self.data_storage.table_manager
-
-    def create_db_table(self,table_name,columns):
-        self.data_base_manager.create_table(table_name, columns)
-    
-    def save_db_table(self, table_name, columns, data):
-        self.data_base_manager.save_data(data,table_name, columns)
-       
-
-    def get_table_data(self, table_name):
-         return self.data_base_manager.load_data(table_name)
-
+    # Работа с температурной
     def save_temp(self, data):
         self.logger.info(
             f"Данные температуры газа {self.data_storage.temperature} сохранены в Data_model"
@@ -128,9 +144,68 @@ class Data_model:
     def get_temperature(self) -> Dict[str, float]:
         return self.data_storage.temperature
 
+    # Работа с исходными таблицами
+    def get_table_manager(self) -> Dict[str, BaseTableManager]:
+        """def get_table_manager(self)-> Dict[str, BaseTableManager]"""
+        return self.data_storage.table_manager
+
+    def create_db_table(self,table_name : str,table_type:str, parametr_table : Dict[str,float]):
+        """Adding source data to the table"""
+        try:
+            self.data_base_manager.add_initial_table(table_name,table_type, parametr_table)
+            showinfo("Успех", "Таблица успешно сохранена")
+        except Exception as e:
+            self.logger.exception(
+                f"Неожиданная ошибка при добавлении таблицы '{table_name}' в базу данных"
+            )
+            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+  
+    def get_table_data(self, table_name) -> Dict[str, float]:
+         return self.data_base_manager.load_data(table_name)
+
     def save_table(self,data):
         self.data_storage.table_manager.update(data)
+    
+    def save_intermedia(self,df,P_out):
+        self.data_base_manager.save(df,P_out)
 
+    # Сохранение/загрузка конфигурации расчета 
+    def export_config(self):
+
+        tables = self.get_table_manager()
+        table_data = {}
+
+        for table_name in tables:
+            print(tables[table_name])
+            serialized_manager = pickle.dumps(tables[table_name])
+            encoded_manager = base64.b64encode(serialized_manager).decode('ascii')
+            print(serialized_manager)
+            data =self.get_table_data(table_name)
+            table_data[table_name]=[encoded_manager,data]
+
+        file = {
+                    "gas_composition": self.load_gas_composition(),
+                    "input_pressure_range": self.get_pressure_range("input"),
+                    "output_pressure_range": self.get_pressure_range("output"),
+                    "temperature": self.get_temperature(),
+                    "table_name": table_data
+                }
+        self.json_manager.save_configure(file)
+        
+    def import_config(self):
+
+        data = self.json_manager.load_data()
+        self.save_sostav_gaz(data["gas_composition"])
+        self.save_temp(data["temperature"])
+        self.data_storage.set_pressure_range("input",data["input_pressure_range"])
+        self.data_storage.set_pressure_range("output",data["output_pressure_range"])
+        for table_name in data["table_name"]:
+            encoded_manager = data["table_name"][table_name][0]
+            serialized_manager = base64.b64decode(encoded_manager.encode('ascii'))
+            table_manager = pickle.loads(serialized_manager)
+            self.data_storage.table_manager[table_name] = table_manager
+            self.create_db_table(table_name,table_manager.get_table_type(),data["table_name"][table_name][1])
+            
 class CSVManager:
     """Работа с файлами типа CSV"""
 
@@ -221,21 +296,47 @@ class CSVManager:
             self.logger.error("Ошибка", f"Не удалось загрузить из файла: {e}")
             showwarning("Ошибка", f"Не удалось загрузить из файла: {e}")
 
-
 class DataBaseManager:
     """Работа с базой данных SQL_Lite"""
 
     def __init__(self):
         self.logger = logging.getLogger("App.DataBaseManager")  # Дочерний логгер
         self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
+        if os.path.exists("tables.db"):
+            os.remove("tables.db")
+        self._create_initial_data_table()
+    
+    def _create_initial_data_table(self):
+            """Создает таблицу Initial_Data если она не существует"""
+            create_query = """
+                CREATE TABLE IF NOT EXISTS "Initial_Data" (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    table_name TEXT NOT NULL,
+                    table_type TEXT NOT NULL,
+                    parameters TEXT NOT NULL
+                )
+            """
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(create_query)
+        
+    def _check_exist_table(self,table_name:str):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT 1 FROM "Initial_Data" WHERE table_name = ? LIMIT 1', 
+                (table_name,)
+            )
+            return cursor.fetchone() is not None
 
-    def _create_table_query(self, colums: List[str], table_name: str) -> str:
+    def _create_table_query(self, table_name: str,colums: List[str]) -> str:
         """Create a request to create a table in the database"""
         # Проверяем, что колонки не пустые
         if not colums:
             self.logger.error("Список колонок пуст!")
             raise ValueError("Колонки не определены")
         # Формируем SQL-запрос для создания таблицы
+        
         create_table_query = f"""
             CREATE TABLE IF NOT EXISTS '{table_name}' (
                 {", ".join([f"{col} REAL" for col in colums])}
@@ -244,7 +345,7 @@ class DataBaseManager:
         self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query} _create_table_query")
         return create_table_query
 
-    def _insert_query(self, colums: List[str], table_name: str) -> str:
+    def _insert_query(self,table_name: str, colums: List[str]) -> str:
         """Create a request to insert data into the table"""
         insert_query = f"""
             INSERT INTO '{table_name}' ({", ".join(colums)}) 
@@ -261,7 +362,7 @@ class DataBaseManager:
         try:
             self.logger.debug(f"Данные для сохранения: {data}")
             print(data[table_name])
-            # print(type(data[0]))
+        
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f"DELETE FROM '{table_name}'")
@@ -285,14 +386,24 @@ class DataBaseManager:
     def load_data(self, table_name: str) -> Dict[str, float]:
         """Загружает данные таблицы в Treeview."""
         self.logger.info(f"Начинаем загрузку данных таблицы '{table_name}'")
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                df = pd.read_sql_query(f"SELECT * FROM '{table_name}'", conn)
-                self.logger.debug(f"Загружены данные: \n{df.to_string()}")
-                row_dict = df.iloc[0].to_dict() #преобразовываем в словарь (столбец:значение)
 
-            self.logger.info(f"Данные таблицы '{table_name}' успешно загружены")
-            return row_dict
+        try:
+            if self._check_exist_table(table_name):
+                with sqlite3.connect(self.db_path) as conn:
+                    df = pd.read_sql_query(f"SELECT parameters FROM 'Initial_Data' WHERE table_name = '{table_name}'", conn)
+                    self.logger.debug(f"Загружены данные: \n{df.to_string()}")
+
+                    parameters_json = df['parameters'].loc[0]  # '{"kv": 50, "lines_count": 1}'
+
+                    # Преобразуем JSON-строку в словарь
+                    row_dict = json.loads(parameters_json)
+
+                    print(f"{type(row_dict)=}")
+                self.logger.info(f"Данные таблицы '{table_name}' успешно загружены")
+                return row_dict
+            else:
+                self.logger.info(f"Таблицы '{table_name}' не существует инициализируем пустой")
+                return None
 
         except sqlite3.OperationalError as e:
             self.logger.error(f"Ошибка загрузки таблицы '{table_name}': {e}")
@@ -306,10 +417,12 @@ class DataBaseManager:
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
             return []
 
-    def create_table(self, table_name: str, columns: List[str]):
+    def create_table(self, table_name : str, parametr_table : Dict[str,float]):
         """Create table in databaze"""
         # Логирование начала создания таблицы
         self.logger.info(f"Начинаем создание таблицы '{table_name}'")
+        columns = list(parametr_table)
+        data = list(parametr_table.values())
         try:
             # Проверяем, что колонки не пустые
             if not columns:
@@ -321,7 +434,7 @@ class DataBaseManager:
             self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query}")
 
             # Формируем SQL-запрос для вставки данных
-            insert_query = self._insert_query(columns, table_name)
+            insert_query = self._insert_query(table_name, columns)
             self.logger.debug(f"SQL-запрос вставки данных: {insert_query}")
 
             # Подключаемся к базе данных
@@ -340,7 +453,7 @@ class DataBaseManager:
                 self.logger.info(
                     "Выполняем вставку пустых данных для инициализации таблицы"
                 )
-                cursor.execute(insert_query, [""] * len(columns))
+                cursor.execute(insert_query, data)
                 self.logger.debug("Данные успешно вставлены")
 
         except sqlite3.OperationalError as e:
@@ -357,6 +470,37 @@ class DataBaseManager:
                 f"Таблица '{table_name}' успешно создана и инициализирована"
             )
 
+    def add_initial_table(self,table_name : str,table_type:str, parametr_table : Dict[str,float]):
+        self.logger.info(f"Начинаем создание таблицы '{table_name}'")
+        
+        try:
+            if not parametr_table:
+                self.logger.error("Список параметров пуст!")
+                raise ValueError("Параметры не определены")
+
+            # Создаем JSON из параметров для хранения в одной колонке
+            import json
+            parameters_json = json.dumps(parametr_table, ensure_ascii=False)
+            
+            # Подготавливаем данные
+            data = [table_name, table_type, parameters_json]
+            columns = ["table_name", "table_type", "parameters"]  # Фиксированные названия колонок
+
+            # Вставляем данные
+            insert_query = self._insert_query("Initial_Data", columns)
+            self.logger.debug(f"SQL-запрос вставки данных: {insert_query}")
+
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(insert_query, data)
+                conn.commit()
+                
+            self.logger.info(f"Таблица '{table_name}' успешно создана и инициализирована")
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка при создании таблицы '{table_name}': {e}")
+            messagebox.showerror("Ошибка", f"Не удалось создать таблицу: {e}")
+
     def get_data_table(self, name_table) -> List[Dict[str, Any]]:  # убрать оттуда
         """Получение данных из базы данных."""
         with sqlite3.connect(self.db_path) as conn:
@@ -365,32 +509,36 @@ class DataBaseManager:
         return df.to_dict(orient="records")[0]  # Список словарей
     
     def save(self,df,name_P_out):
+        print(f"{name_P_out=}")
         column = df.columns.tolist()
+        print(f"{df.index.tolist()=}")
         # Формируем SQL-определение столбцов
         column_definitions = ", ".join([f"{col} REAL" for col in column])
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             # cursor.execute(f"DELETE FROM {name_P_out}")  # Очистка таблицы
-            # create_table_query = (f"CREATE TABLE IF NOT EXISTS {name_P_out} ({column_definitions})")
-            # cursor.execute(create_table_query)
+            print(f"{df.iloc[0]=}")
+            create_table_query = f"CREATE TABLE IF NOT EXISTS \"{name_P_out}\" (table_name TEXT,{column_definitions})"
+            print(f"{create_table_query=}")
+            cursor.execute(create_table_query)
             # Добавляем данные из DataFrame
-            df.to_sql(name_P_out, conn, if_exists="replace", index=True)
-        logger.info(f"Промежуточная таблица {name_P_out=} сохранена в базе данных")
-
+            df.to_sql(name_P_out, conn, if_exists="replace", index=True,index_label =  "table_name")
+        self.logger.info(f"Промежуточная таблица {name_P_out=} сохранена в базе данных")
 
 class JsonManager:
     """Работа с файлами типа Json"""
 
     def __init__(self):
         self.logger = logging.getLogger("App.JsonManager")  # Дочерний логгер
+        self.saves_dir = "Saves"
 
-    def save_data(self, data):
-        saves_dir = "Saves"
-        os.makedirs(saves_dir, exist_ok=True)  # Создаем директорию, если её нет
-        data_dict = data
+    def save_configure(self, data):
+        
+        os.makedirs(self.saves_dir, exist_ok=True)  # Создаем директорию, если её нет
+
         file_path = filedialog.asksaveasfilename(
             title="Сохранить файл",
-            initialdir=saves_dir,
+            initialdir=self.saves_dir,
             defaultextension=".json",  # Расширение по умолчанию
             filetypes=[
                 ("JSON files", "*.json"),
@@ -398,7 +546,7 @@ class JsonManager:
             ],  # Фильтр типов файлов
         )
         with open(file_path, "w", encoding="utf-8") as outfile:
-            json.dump(data_dict, outfile, indent=4, ensure_ascii=False)
+            json.dump(data, outfile, indent=4, ensure_ascii=False)
 
     def load_data(self):
         file_path = filedialog.askopenfilename(
@@ -413,7 +561,6 @@ class JsonManager:
             data = json.load(outfile)
 
         return data
-
 
 class DataStorage:
     """Хранилище данных для работы с данными в программе"""
@@ -433,39 +580,14 @@ class DataStorage:
         return self.gas_composition
 
     @data_gas_composition.setter
-    def data_gas_composition(self, composition: Dict[str, str]):
-        # Сохраняем введенные данные
-        total_percentage = 0.0
-        self.gas_composition = {}  # Очищаем словарь, что бы не накладывало значения
-        for component, percentage in composition.items():
-            try:
-                percentage = float(percentage)
-                if percentage < 0:
-                    raise ValueError("Отрицательное значение")
-                self.gas_composition[component] = percentage
-                total_percentage += percentage
-            except ValueError:
-                self.gas_composition[component] = (
-                    0.0  # Если введено неверное значение, считаем 0%
-                )
+    def data_gas_composition(self, composition: Dict[str, float]):
+        """Устанавливает состав газа. Ожидается уже провалидированный словарь."""
+        if not isinstance(composition, dict):
+                self.logger.error("Попытка установить состав газа не словарем.")
+                raise ValueError("Попытка установить состав газа не словарем.")
 
-        # Проверяем, что сумма процентов равна 100%
-        if abs(total_percentage - 100.0) > 0.001:  # Допускаем небольшую погрешность
-            print(f"{abs(total_percentage - 100.0)=}")
-            self.logger.error(
-                "Ошибка",
-                f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%",
-            )
-            showwarning(
-                "Ошибка",
-                f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%",
-            )
-            return
-
-        else:
-            showinfo("Успех", "Данные успешно сохранены!")
-            self.logger.info("Состав газа сохранен")
-
+        self.gas_composition = composition
+       
     def get_input_pressure_range(self) -> List[float]:
         return self.input_pressure_range
 
@@ -509,15 +631,6 @@ class DataStorage:
         # for i in self.tables_data:
         #     # print(f"{self.tables_data[i].get_table_type()=}")
         self.logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")
-
-    def get_gas_properties(self):
-        return self.gas_properties
-
-    def set_gas_properties(self, gas_properties):
-        self.gas_properties = gas_properties
-        self.logger.info(
-            f"Данные свойств газа {self.gas_properties} сохранены в Data_model"
-        )
 
     @property
     def temperature(self) -> Dict[str, float]:
