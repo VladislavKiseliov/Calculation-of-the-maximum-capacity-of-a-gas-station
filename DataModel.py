@@ -41,28 +41,24 @@ class Data_model:
                 raise ValueError("Ошибка: Минимальное давление больше максимального.")
             if step <= 0:
                 raise ValueError("Ошибка: Шаг должен быть положительным числом.")
+            if min_pressure + step > max_pressure:
+                raise ValueError("Ошибка: Диапазон не коректен")
+                
 
-            pressure_range = np.arange(
-                min_pressure, max_pressure + step, step
-            ).tolist()
+            pressure_range = np.arange(min_pressure, max_pressure + step, step).tolist()
+            
             return [round(p, 1) for p in pressure_range]
 
-        except ValueError as e:
-            # Вывод ошибки
-            showwarning("Ошибка", e)
-            return
+        except ValueError:
+            raise
 
     def save_pressure_range1(self, title: str, min_pressure:float,max_pressure:float,step:float):
         """
         Сохраняет диапазон давлений.
         """
-        if not all([min_pressure, max_pressure, step]):
-            raise ValueError("Ошибка: Введите значения")
         try:
             pressure_type = title.lower()
-            set_pressure_range = self._calculate_pressure_range(
-                min_pressure, max_pressure, step
-            )
+            set_pressure_range = self._calculate_pressure_range(min_pressure, max_pressure, step)
             
             self.data_storage.set_pressure_range(pressure_type, set_pressure_range)
 
@@ -72,9 +68,13 @@ class Data_model:
                 min_pressure,
                 step,
             )
-        except ValueError:
-            self.logger.warning("Введите корректные числовые значения!")
-            showwarning("Ошибка", "Введите корректные числовые значения!")
+        except ValueError as e:
+            self.logger.warning(f"Ошибка при расчете диапазона {title} давление {e}")
+            raise 
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка при сохранение давления - {e}")
+            raise
 
     def get_pressure_range(self, title: str) -> List[float]:
         """
@@ -133,15 +133,13 @@ class Data_model:
         return self.csv_manager.load_gas_composition_from_csv()
 
     # Работа с температурной
-    def save_temp(self, data):
-        self.logger.info(
-            f"Данные температуры газа {self.data_storage.temperature} сохранены в Data_model"
-        )
-        print(data)
-        self.data_storage.temperature = data
-        print(self.data_storage.temperature)
-
+    def save_temp(self, temperature_dict : Dict[str, float]):
+        """Сохраняем температуру в память программы"""
+        self.logger.info(f"Сохраняем температуру {temperature_dict} в память")
+        self.data_storage.temperature = temperature_dict
+    
     def get_temperature(self) -> Dict[str, float]:
+        """Получить температуру из памяти"""
         return self.data_storage.temperature
 
     # Работа с исходными таблицами
@@ -153,7 +151,7 @@ class Data_model:
         """Adding source data to the table"""
         try:
             self.data_base_manager.add_initial_table(table_name,table_type, parametr_table)
-            showinfo("Успех", "Таблица успешно сохранена")
+    
         except Exception as e:
             self.logger.exception(
                 f"Неожиданная ошибка при добавлении таблицы '{table_name}' в базу данных"
@@ -166,46 +164,63 @@ class Data_model:
     def save_table(self,data):
         self.data_storage.table_manager.update(data)
     
-    def save_intermedia(self,df,P_out):
-        self.data_base_manager.save(df,P_out)
+    def save_intermedia(self,df:pd.DataFrame,name_table:str):
+        self.data_base_manager.save(df,name_table)
 
     # Сохранение/загрузка конфигурации расчета 
     def export_config(self):
+        """Экспорт сохранения в файл .json"""
+        try:
+            tables = self.get_table_manager()
+            table_data = {}
 
-        tables = self.get_table_manager()
-        table_data = {}
+            for table_name in tables:
 
-        for table_name in tables:
-            print(tables[table_name])
-            serialized_manager = pickle.dumps(tables[table_name])
-            encoded_manager = base64.b64encode(serialized_manager).decode('ascii')
-            print(serialized_manager)
-            data =self.get_table_data(table_name)
-            table_data[table_name]=[encoded_manager,data]
+                serialized_manager = pickle.dumps(tables[table_name]) #Сеарилизация объектов таблиц для сохранния
+                encoded_manager = base64.b64encode(serialized_manager).decode('ascii') # Кодируем сеарилизованный объект для сохранения в json
+                data =self.get_table_data(table_name)
+                table_data[table_name]=[encoded_manager,data]
 
-        file = {
-                    "gas_composition": self.load_gas_composition(),
-                    "input_pressure_range": self.get_pressure_range("input"),
-                    "output_pressure_range": self.get_pressure_range("output"),
-                    "temperature": self.get_temperature(),
-                    "table_name": table_data
-                }
-        self.json_manager.save_configure(file)
-        
+            self.logger.info("Создаем словарь со всеми исходными данными")
+            file = {
+                        "gas_composition": self.load_gas_composition(),
+                        "input_pressure_range": self.get_pressure_range("input"),
+                        "output_pressure_range": self.get_pressure_range("output"),
+                        "temperature": self.get_temperature(),
+                        "table_name": table_data
+                    }
+            self.json_manager.save_configure(file)
+            self.logger.info("Сохранение успошно сохранено в json")
+
+            showinfo("Успех", "Конфигурация успешно сохранена")
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка при сохранения конфигурации - {e}")
+            showwarning("Ошибка", "При сохранении исходных данных в файл возникла ошибка")
+ 
     def import_config(self):
+        """Импорт сохранения из файла .json"""
+        
+        try:
+            data = self.json_manager.load_data()
+            self.save_sostav_gaz(data["gas_composition"])
+            self.save_temp(data["temperature"])
+            self.data_storage.set_pressure_range("input",data["input_pressure_range"])
+            self.data_storage.set_pressure_range("output",data["output_pressure_range"])
+            for table_name in data["table_name"]:
+                encoded_manager = data["table_name"][table_name][0]
+                serialized_manager = base64.b64decode(encoded_manager.encode('ascii'))
+                table_manager = pickle.loads(serialized_manager)
+                self.data_storage.table_manager[table_name] = table_manager
+                self.create_db_table(table_name,table_manager.get_table_type(),data["table_name"][table_name][1])
+            self.logger.info(f"Данные их сохранения успешно загруженны! Данные: {data}")
 
-        data = self.json_manager.load_data()
-        self.save_sostav_gaz(data["gas_composition"])
-        self.save_temp(data["temperature"])
-        self.data_storage.set_pressure_range("input",data["input_pressure_range"])
-        self.data_storage.set_pressure_range("output",data["output_pressure_range"])
-        for table_name in data["table_name"]:
-            encoded_manager = data["table_name"][table_name][0]
-            serialized_manager = base64.b64decode(encoded_manager.encode('ascii'))
-            table_manager = pickle.loads(serialized_manager)
-            self.data_storage.table_manager[table_name] = table_manager
-            self.create_db_table(table_name,table_manager.get_table_type(),data["table_name"][table_name][1])
-            
+            showinfo("Успех", "Данные успешно добавленны")
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка при открытии конфигурации - {e}")
+            showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
+
 class CSVManager:
     """Работа с файлами типа CSV"""
 
@@ -398,7 +413,6 @@ class DataBaseManager:
                     # Преобразуем JSON-строку в словарь
                     row_dict = json.loads(parameters_json)
 
-                    print(f"{type(row_dict)=}")
                 self.logger.info(f"Данные таблицы '{table_name}' успешно загружены")
                 return row_dict
             else:
@@ -516,10 +530,7 @@ class DataBaseManager:
         column_definitions = ", ".join([f"{col} REAL" for col in column])
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            # cursor.execute(f"DELETE FROM {name_P_out}")  # Очистка таблицы
-            print(f"{df.iloc[0]=}")
             create_table_query = f"CREATE TABLE IF NOT EXISTS \"{name_P_out}\" (table_name TEXT,{column_definitions})"
-            print(f"{create_table_query=}")
             cursor.execute(create_table_query)
             # Добавляем данные из DataFrame
             df.to_sql(name_P_out, conn, if_exists="replace", index=True,index_label =  "table_name")
@@ -612,12 +623,9 @@ class DataStorage:
             self.logger.info(f"Данные диапазона {pressure_type} давления сохранены")
 
             print(getattr(self, f"{pressure_type}_pressure_range"))
-            showinfo("Успех", "Данные успешно сохранены!")
-            # window.destroy()  # Закрываем окно
-
+   
         except Exception as e:
             self.logger.error(f"Не удалось сохранить данные: {e}")
-            showwarning("Ошибка", f"Не удалось сохранить данные: {e}")
 
     @property
     def table_manager(self) -> Dict[str, Any]:
@@ -638,8 +646,6 @@ class DataStorage:
 
     @temperature.setter
     def temperature(self, temp: Dict[str, float]):
+
         self._temperature = temp
-        self.logger.info(
-            f"Данные температуры газа {self._temperature} сохранены в Data_model"
-        )
-        showinfo("Успех", "Данные успешно сохранены!")
+        self.logger.info(f"Данные температуры газа {self._temperature} сохранены в DataStorage")

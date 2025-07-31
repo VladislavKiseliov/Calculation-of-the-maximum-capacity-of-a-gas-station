@@ -31,10 +31,9 @@ def calculate_Ky(P_in, P_out, t_in_regulator, Relative_gas_density, Kv, count_li
     return Q
 
 def heat_balance(P_in,P_out,T_in,T_out,Boiler_capacity,Di,Ccp,typeCalculate = False):
-
     T_heat_exchanger = T_out+(P_in-P_out) * Di
-    Q = (Boiler_capacity/(1163*0.000_001*(T_heat_exchanger-T_in)*Ccp))
-    # print(f"{(1163*0.000_001*(T_heat_exchanger-T_in)*Ccp)=}")
+    Q = (Boiler_capacity/(1163*0.000001*(T_heat_exchanger-T_in)*Ccp))
+    # print(f"{(1163*0.0.000001*(T_heat_exchanger-T_in)*Ccp)=}")
     if typeCalculate:
         return Q
     else:

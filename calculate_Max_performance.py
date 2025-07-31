@@ -67,7 +67,7 @@ class Max_performance:
         """Расчет теплового баланса"""
         self._calculation_stats['heat_balance_calculations'] += 1
         self.logger.debug(f"Расчет теплового баланса: Pin={col_pressure} МПа, Pout={p_out} МПа")
-        
+
         try:
             *_, Di_in, Ccp_in = self._calculate_propertys_gaz(col_pressure, self.temperature["input"])
             result = Calculate_file.heat_balance(
@@ -221,7 +221,7 @@ class Max_performance:
         # Валидация входных данных
         if not all([p_in, tables, temperature, gas_composition, table_data]):
             raise ValueError("Все параметры должны быть заданы")
-        print(f"{table_data=}")
+       
         # Установка параметров
         self.input_pressure_range = p_in
         self.tables_data = tables
@@ -233,6 +233,7 @@ class Max_performance:
             result = self._full_calculate(p_out,table_data,tables)
             self.logger.info("РАСЧЕТ УСПЕШНО ЗАВЕРШЕН")
             return result
+        
         except Exception as e:
             self.logger.error(f"Ошибка при выполнении расчета: {e}")
             raise

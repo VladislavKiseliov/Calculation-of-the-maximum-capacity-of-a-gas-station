@@ -1,3 +1,0 @@
-rerirТаблица для регуляторов<__main__.RegulatorTableManager object at 0x000001C2B18678F0>
-tljkofdТаблицы для труб после регулятора<__main__.PipeTableManager object at 0x000001C2B1852EA0>
-gdТаблицы для труб до регулятора<__main__.PipeTableManager object at 0x000001C2B177F2C0>
