@@ -1,5 +1,8 @@
 import math
+
 import pandas as pd
+from functools import lru_cache
+
 
 def calculate_Ky(P_in, P_out, t_in_regulator, Relative_gas_density, Kv, count_lines,flag = False,T_out = 0,Di = 0):
     # Преобразование давлений в абсолютные значения
@@ -38,7 +41,8 @@ def heat_balance(P_in,P_out,T_in,T_out,Boiler_capacity,Di,Ccp,typeCalculate = Fa
         return Q
     else:
         return Q,T_heat_exchanger
-    
+
+@lru_cache(maxsize=128)
 def calc( pipe_diameter_mm, pipe_wall_thickness_mm, gas_pressure_mpa, gas_temperature_c,
              gas_flow_velocity_m_s, number_of_lines,compressibility_factor):
         # Расчет внутреннего диаметра
@@ -66,6 +70,7 @@ def calc( pipe_diameter_mm, pipe_wall_thickness_mm, gas_pressure_mpa, gas_temper
             )
         )
         return Q
+
 
 def data_frame(P_in,t_in,gas_compositio):
     # Загрузка данных

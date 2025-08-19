@@ -4,6 +4,7 @@ from DataModel import CSVManager, Data_model, DataBaseManager, DataStorage, Json
 import pandas as pd
 from typing import Dict, Any, Tuple
 import time
+from functools import lru_cache
 
 
 class Max_performance:
@@ -16,6 +17,7 @@ class Max_performance:
             'gas_properties_calls': 0
         }
 
+
     def _calculate_tube(self, col_pressure: float, data: Dict[str, Any]) -> float:
         """Расчет параметров трубы"""
         self._calculation_stats['tube_calculations'] += 1
@@ -23,6 +25,7 @@ class Max_performance:
         
         try:
             _, z, *_ = self._calculate_propertys_gaz(col_pressure, data["gas_temperature"])
+            self.logger.debug(f"Кеш: {self._calculate_propertys_gaz.cache_info()}")
             
             result = float(Calculate_file.calc(
                 data["pipe_diameter"],      # Диаметр трубы
@@ -33,6 +36,7 @@ class Max_performance:
                 data["lines_count"],       # Количество линий
                 z
             ))
+            self.logger.debug(f"Кеш расчета трубы: {Calculate_file.calc.cache_info()}")
             self.logger.debug(f"Расчет трубы завершен: результат={result:.6f}")
             return result
         except Exception as e:
@@ -46,6 +50,7 @@ class Max_performance:
         
         try:
             *_, plotnost, Di_in, _ = self._calculate_propertys_gaz(col_pressure, self.temperature["input"])
+            self.logger.debug(f"Кеш: {self._calculate_propertys_gaz.cache_info()}")
             result = float(Calculate_file.calculate_Ky(
                 col_pressure,
                 p_out,
@@ -85,7 +90,8 @@ class Max_performance:
         except Exception as e:
             self.logger.error(f"Ошибка расчета теплового баланса (Pin={col_pressure}, Pout={p_out}): {e}")
             raise
-
+    
+    @lru_cache(maxsize=128)
     def _calculate_propertys_gaz(self, gas_pressure_mpa: float, gas_temperature_c: float) -> Tuple:
         """Расчет свойств газа"""
         self._calculation_stats['gas_properties_calls'] += 1
@@ -124,6 +130,8 @@ class Max_performance:
                 case "Таблицы для труб после регулятора":
                     result = self._calculate_tube(P_out, data)
                     self.logger.debug(f"Труба после регулятора: {result}")
+                    
+
                     
                 case "Таблица котельной":
                     result = self._calculate_heat_balance(col_pressure, P_out, data)

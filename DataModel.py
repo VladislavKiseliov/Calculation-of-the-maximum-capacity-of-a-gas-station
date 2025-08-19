@@ -159,13 +159,15 @@ class Data_model:
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
   
     def get_table_data(self, table_name) -> Dict[str, float]:
-         return self.data_base_manager.load_data(table_name)
+        df = self.data_base_manager.get_data_table("Boiler Pout_0.6")
+        print(f"{df=}")
+        return self.data_base_manager.load_data(table_name)
 
     def save_table(self,data):
         self.data_storage.table_manager.update(data)
     
-    def save_intermedia(self,df:pd.DataFrame,name_table:str):
-        self.data_base_manager.save(df,name_table)
+    def save_intermedia(self,df:pd.DataFrame,name_table:str,index_flag = False):
+        self.data_base_manager.save(df,name_table,index_flag)
 
     # Сохранение/загрузка конфигурации расчета 
     def export_config(self):
@@ -207,6 +209,7 @@ class Data_model:
             self.save_temp(data["temperature"])
             self.data_storage.set_pressure_range("input",data["input_pressure_range"])
             self.data_storage.set_pressure_range("output",data["output_pressure_range"])
+
             for table_name in data["table_name"]:
                 encoded_manager = data["table_name"][table_name][0]
                 serialized_manager = base64.b64decode(encoded_manager.encode('ascii'))
@@ -220,6 +223,59 @@ class Data_model:
         except Exception as e:
             self.logger.exception(f"Ошибка при открытии конфигурации - {e}")
             showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
+    
+    # Сохранение/загрузка конфигурации расчета
+    def load_boiler_data(self)-> pd.DataFrame:
+         # Сначала проверяем, выбрал ли пользователь файл
+        file_path = filedialog.askopenfilename(
+            title="Выберите файл для загрузки данных котельной",
+            filetypes=[
+                ("Excel files", "*.xlsx"),
+                ("All files", "*.*"),
+            ],
+        )
+        
+        if not file_path:  # Если пользователь отменил выбор
+            self.logger.warning("Отмена. Сохранение отменено пользователем")
+            return
+        
+        try:
+            # Читаем Excel файл
+            df = pd.read_excel(file_path, engine="openpyxl")
+            self.logger.info(f"Файл успешно загружен: {file_path}")
+            print(f" До фидьра{df=}")
+            df = df.drop_duplicates(subset=['Mpainput', 'MPAout'])
+            print(f" после фидьра{df=}")
+            # Группируем по выходному давлению
+            grouped = df.groupby('MPAout')
+            
+            for outpressure, group_data in grouped:
+                # Берем нужные столбцы
+                filtered_data = group_data[['Mpainput', 'Nm3h', 'C']].copy()
+                
+                # Преобразуем данные: значения Mpainput становятся названиями столбцов
+                transposed = filtered_data.T  # Теперь столбцы - это Mpainput значения
+                
+                # Используем первую строку (Mpainput) как названия столбцов для остальных данных
+                pressure_values = transposed.loc['Mpainput'].tolist()
+                col_name = [f"Pin_{str(col_pressure).replace('.', '_')}" for col_pressure in pressure_values]
+                print(f"{col_name=}")
+                # Берем только данные (Nm3h и C)
+                result_df = transposed.loc[['Nm3h', 'C']].copy()
+                result_df.columns = col_name  # Устанавливаем давления как названия столбцов
+               
+                # Сохраняем преобразованные данные
+                self.save_intermedia(result_df,f"Boiler Pout_{str(outpressure)}")
+                
+        except FileNotFoundError:
+            self.logger.error(f"Файл не найден: {file_path}")
+            raise 
+        except KeyError as e:
+            self.logger.error(f"Отсутствует необходимый столбец в данных: {e}")
+            raise
+        except Exception as e:
+            self.logger.exception(f"Ошибка при загрузке данных котельной: {e}")
+            raise
 
 class CSVManager:
     """Работа с файлами типа CSV"""
@@ -354,7 +410,7 @@ class DataBaseManager:
         
         create_table_query = f"""
             CREATE TABLE IF NOT EXISTS '{table_name}' (
-                {", ".join([f"{col} REAL" for col in colums])}
+                {", ".join([f"{col} REAL" for col in colums])}  
             )
         """
         self.logger.debug(f"SQL-запрос создания таблицы: {create_table_query} _create_table_query")
@@ -518,11 +574,14 @@ class DataBaseManager:
     def get_data_table(self, name_table) -> List[Dict[str, Any]]:  # убрать оттуда
         """Получение данных из базы данных."""
         with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql_query(f"SELECT * FROM {name_table}", conn)
+            df = pd.read_sql_query(f'SELECT * FROM "{name_table}"', conn)
             self.logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
+            print(f"{df.to_dict(orient="records")=}")
+        
         return df.to_dict(orient="records")[0]  # Список словарей
     
-    def save(self,df,name_P_out):
+    def save(self,df,name_P_out,index_flag = False):
+
         print(f"{name_P_out=}")
         column = df.columns.tolist()
         print(f"{df.index.tolist()=}")
@@ -530,10 +589,10 @@ class DataBaseManager:
         column_definitions = ", ".join([f"{col} REAL" for col in column])
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            create_table_query = f"CREATE TABLE IF NOT EXISTS \"{name_P_out}\" (table_name TEXT,{column_definitions})"
+            create_table_query = f'CREATE TABLE IF NOT EXISTS \"{name_P_out}\" (table_name TEXT,{column_definitions})'
             cursor.execute(create_table_query)
             # Добавляем данные из DataFrame
-            df.to_sql(name_P_out, conn, if_exists="replace", index=True,index_label =  "table_name")
+            df.to_sql(name_P_out, conn, if_exists="replace", index=index_flag,index_label =  "table_name")
         self.logger.info(f"Промежуточная таблица {name_P_out=} сохранена в базе данных")
 
 class JsonManager:

@@ -3,6 +3,7 @@ import logging
 import math
 import tkinter as tk
 from tkinter import FALSE, Menu, messagebox, ttk
+from tkinter import filedialog
 from typing import Dict, List
 import pandas as pd
 from tkinter.messagebox import showinfo, showwarning
@@ -135,7 +136,7 @@ class GuiManager:
             self.tabs[name] = frame  # Сохраняем фрейм в словаре
             self.notebook.add(frame, text=name)
 
-cgirlass Initial_data:
+class Initial_data:
 
     def __init__(self, parent, callback: CallbackRegistry):
         self.callback = callback
@@ -398,7 +399,7 @@ class GuiTable:
         self.row,
         lambda e=self.entry_name_table: self.callback.trigger(
             "open_table", 
-            name=e.get(), 
+            table_name = e.get(), 
             table_type=table_type
         ),
         3
@@ -518,18 +519,22 @@ class TableController:
             logger.warning(f"Таблица '{table_name}' уже существует")
             messagebox.showwarning("Ошибка", f"Таблица '{table_name}' уже существует!")
             return
+        
         manager = TableFactory.create_table_manager(table_type)
         self.tables[table_name] = manager
         data = {table_name:manager}
         self.model.save_table(data)
    
-    def open_table(self,name, table_type):
-        table_name = name
-       
+    def open_table(self,table_name, table_type):
+        
         if table_name not in self.tables:
             self.create_table(table_name, table_type)
-        data = self.model.get_table_data(table_name)
-        self.guitable.open_table_window(table_name,self.tables[table_name].get_columns(),data)
+
+        if table_type == "Таблица котельной":
+           self.loda_boiler_data()
+        else:
+            data = self.model.get_table_data(table_name)
+            self.guitable.open_table_window(table_name,self.tables[table_name].get_columns(),data)
  
     def save_table(self):
        """Saving the original table data to the database"""
@@ -540,7 +545,23 @@ class TableController:
        data = dict(zip(columns, values))
        self.model.create_db_table(table_name,self.tables[table_name].get_table_type(), data)
        self.guitable.window_table.destroy()
-       
+
+    def loda_boiler_data(self):
+        try:
+            self.model.load_boiler_data() # Запускаем загрузку данных кательной
+            self.logger.info("Все данные успешно обработаны и сохранены")
+            showinfo("Успех", "Данные котельной успешно загружены и обработаны!")
+            
+        except FileNotFoundError:
+            messagebox.showerror("Ошибка", "Выбранный файл не найден")
+            return
+        except KeyError as e:
+            messagebox.showerror("Ошибка", f"В файле отсутствует необходимый столбец: {e}")
+            return
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Произошла ошибка при загрузке данных: {str(e)}")
+            return
+    
 class Сontroller:
 
     def __init__(
@@ -715,16 +736,19 @@ class Сontroller:
         self.table_controller.create_window_table(tables)
 
     def calculate(self):
+        
         input_pressure = self.model.get_pressure_range("input") #Диапазон входного давления
         output_pressure = self.model.get_pressure_range("output") #Диапазон выходного давления
         tables = self.model.get_table_manager() # Названия таблиц
         temperature = self.model.get_temperature()
         gas_composition = self.model.load_gas_composition()
         tables_data ={}
+
         for table_name in tables:
             tables_data[table_name] = self.model.get_table_data(table_name)
-        
+        print(f"{tables_data=}")
         df_result = pd.DataFrame()
+        
         for P_out in output_pressure:
             df = self.max_performance.calculate(input_pressure,
                                        P_out,
@@ -732,10 +756,10 @@ class Сontroller:
                                        temperature,
                                        gas_composition,
                                        tables_data)    
-            print(df)
-            self.model.save_intermedia(df,f"Промежуточный результат для P_out={P_out}")
+            # print(df)
+            self.model.save_intermedia(df,f"Промежуточный результат для P_out={P_out}",index_flag = True)
             df_min = pd.DataFrame([df.min()])
-            print(f"{df_min=}") 
+            # print(f"{df_min=}") 
             self.logger.debug(f"Результат full_calculate для {P_out=}: \n{df_min.to_string()}")
                 
             # Установка индекса
@@ -749,7 +773,14 @@ class Сontroller:
         # Сохранение результата
         self.model.save_intermedia(df_result, "Результирующая таблица")
         self.logger.info(f"Сохранена результирующая таблица: \n{df_result}")    
-        print(f"{df_result=}")
+        # print(f"{df_result=}")
+        
+        self.create_plot(df_result,input_pressure,output_pressure)
+
+    def create_plot(self,df_result: pd.DataFrame,input_pressures,output_pressures ):
+        
+
+
         #Построение графика
         logger.info("Начало построения графика")
         plt.figure(figsize=(10, 6))
@@ -777,7 +808,14 @@ class Сontroller:
         
         logger.info("График успешно построен. Отображение...")
         plt.show()
-    
+
+
+
+
+
+
+
+
 
 
 class Calculation_gas_properties:
