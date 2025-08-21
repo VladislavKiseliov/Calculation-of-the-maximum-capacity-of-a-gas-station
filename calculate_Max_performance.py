@@ -67,6 +67,15 @@ class Max_performance:
         except Exception as e:
             self.logger.error(f"Ошибка расчета регулятора (Pin={col_pressure}, Pout={p_out}): {e}")
             raise
+    
+    def _calculate_heat_balanc(self,df: pd.DataFrame):
+        
+        
+        
+        
+        pass
+
+
 
     def _calculate_heat_balance(self, col_pressure: float, p_out: float, data: Dict[str, Any]) -> float:
         """Расчет теплового баланса"""

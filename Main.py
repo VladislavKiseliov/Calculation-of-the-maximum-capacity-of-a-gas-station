@@ -779,8 +779,6 @@ class Сontroller:
 
     def create_plot(self,df_result: pd.DataFrame,input_pressures,output_pressures ):
         
-
-
         #Построение графика
         logger.info("Начало построения графика")
         plt.figure(figsize=(10, 6))

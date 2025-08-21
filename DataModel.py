@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox
 from tkinter.messagebox import showinfo, showwarning
 from typing import Any, Dict, List
 import pickle
+import json
 
 import numpy as np
 import pandas as pd
@@ -159,7 +160,7 @@ class Data_model:
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
   
     def get_table_data(self, table_name) -> Dict[str, float]:
-        df = self.data_base_manager.get_data_table("Boiler Pout_0.6")
+        df = self.data_base_manager.get_data_table("Boiler_data")
         print(f"{df=}")
         return self.data_base_manager.load_data(table_name)
 
@@ -225,48 +226,121 @@ class Data_model:
             showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
     
     # Сохранение/загрузка конфигурации расчета
-    def load_boiler_data(self)-> pd.DataFrame:
-         # Сначала проверяем, выбрал ли пользователь файл
+    def load_boiler_data(self):
+        """
+        Загружает и обрабатывает данные котельной из CSV файла.
+        """
+        # Сначала проверяем, выбрал ли пользователь файл
         file_path = filedialog.askopenfilename(
             title="Выберите файл для загрузки данных котельной",
             filetypes=[
-                ("Excel files", "*.xlsx"),
+                ("CSV files", "*.csv"),
                 ("All files", "*.*"),
             ],
         )
         
         if not file_path:  # Если пользователь отменил выбор
             self.logger.warning("Отмена. Сохранение отменено пользователем")
+            showwarning("Отмена", "Сохранение отменено пользователем")
             return
-        
+
         try:
-            # Читаем Excel файл
-            df = pd.read_excel(file_path, engine="openpyxl")
-            self.logger.info(f"Файл успешно загружен: {file_path}")
-            print(f" До фидьра{df=}")
-            df = df.drop_duplicates(subset=['Mpainput', 'MPAout'])
-            print(f" после фидьра{df=}")
-            # Группируем по выходному давлению
-            grouped = df.groupby('MPAout')
+            # Пробуем разные кодировки
+            encodings = ['utf-8', 'windows-1251', 'cp1251', 'utf-8-sig']
+            df_raw = None
+            used_encoding = None
+            
+            for encoding in encodings:
+                try:
+                    df_raw = pd.read_csv(file_path, delimiter=';', skiprows=2, encoding=encoding)
+                    used_encoding = encoding
+                    self.logger.info(f"Файл успешно прочитан с кодировкой: {encoding}")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if df_raw is None:
+                raise ValueError("Не удалось определить кодировку файла")
+            
+            # Удаляем строки "Максимум" и "Минимум" (проверяем по первому столбцу)
+            mask = ~df_raw.iloc[:, 0].isin(['Максимум', 'Минимум'])
+            df_raw = df_raw[mask]
+            
+            # Проверяем, что данные есть
+            if df_raw.empty:
+                raise ValueError("Файл пустой или не содержит данных после фильтрации")
+            
+            # Убираем первый столбец (названия сценариев) и сбрасываем индекс
+            df_processed = df_raw.iloc[:, 1:].reset_index(drop=True)
+            
+            # Переименовываем столбцы в более удобный формат
+            if len(df_processed.columns) >= 4:
+                column_mapping = {
+                    df_processed.columns[0]: 'InputPressure',      # "1.1 - Давление"
+                    df_processed.columns[1]: 'OutputPressure',       # "4.3 - Давление"
+                    df_processed.columns[2]: 'Nm3h',        # "Q-4 - Масс. расх."
+                    df_processed.columns[3]: 'C'            # "Q-4 - Тепловой поток"
+                }
+                df_processed.rename(columns=column_mapping, inplace=True)
+            else:
+                raise ValueError(f"Недостаточно столбцов в файле. Ожидалось минимум 4, получено {len(df_processed.columns)}")
+            
+            self.logger.info(f"Файл успешно загружен и предварительно обработан: {file_path}")
+            print(f"После предварительной обработки:\n{df_processed}")
+
+            # Группируем по выходному давлению (MPAout)
+            grouped = df_processed.groupby('OutputPressure')
+            print(f"{grouped=}")
+
+            # Создаем пустой DataFrame для всех данных
+            result_df = pd.DataFrame()
+            processed_count = 0
             
             for outpressure, group_data in grouped:
                 # Берем нужные столбцы
-                filtered_data = group_data[['Mpainput', 'Nm3h', 'C']].copy()
+                if not all(col in group_data.columns for col in ['InputPressure', 'Nm3h', 'C']):
+                    self.logger.warning(f"Недостаточно данных для давления {outpressure}")
+                    continue
+                    
+                # Создаем словарь для данных текущей группы
+                row_data = {}
                 
-                # Преобразуем данные: значения Mpainput становятся названиями столбцов
-                transposed = filtered_data.T  # Теперь столбцы - это Mpainput значения
+                # Проходим по каждой строке в группе
+                for _, row in group_data.iterrows():
+                    input_pressure = row['InputPressure']
+                    nm3h = row['Nm3h']
+                    c_value = row['C']
+                    
+                    # Формируем название столбца
+                    col_name = f"Pin_{str(input_pressure).replace('.', '_')}"
+                    
+                    # Формируем значение в нужном формате [[Nm3h, C]]
+                    
+                    # row_data[col_name] = [[nm3h, c_value]]
+                    parameters_json = json.dumps({'Nm3h': nm3h, 'C': c_value}, ensure_ascii=False)
+                    row_data[col_name] = parameters_json
                 
-                # Используем первую строку (Mpainput) как названия столбцов для остальных данных
-                pressure_values = transposed.loc['Mpainput'].tolist()
-                col_name = [f"Pin_{str(col_pressure).replace('.', '_')}" for col_pressure in pressure_values]
-                print(f"{col_name=}")
-                # Берем только данные (Nm3h и C)
-                result_df = transposed.loc[['Nm3h', 'C']].copy()
-                result_df.columns = col_name  # Устанавливаем давления как названия столбцов
-               
+                # Добавляем строку в результирующий DataFrame
+                result_df = pd.concat([result_df, pd.DataFrame([row_data], index=[f"Pout_{str(outpressure)}"])])
+                processed_count += 1
+            
+            # Сортируем индекс (выходное давление)
+            result_df.sort_index(inplace=True)
+            
+            print("Итоговая таблица:")
+            print(result_df)
+                
                 # Сохраняем преобразованные данные
-                self.save_intermedia(result_df,f"Boiler Pout_{str(outpressure)}")
-                
+            self.save_intermedia(result_df, "Boiler_data",True)
+ 
+                    
+        # except Exception as e:
+        #     self.logger.error(f"Ошибка при обработке данных для давления {outpressure}: {e}")
+        #     continue
+            
+        #     showinfo("Успех", f"Данные котельной успешно загружены и обработаны! Обработано {processed_count} групп давления.")
+        #     self.logger.info(f"Все данные успешно обработаны и сохранены. Обработано {processed_count} групп давления.")
+                    
         except FileNotFoundError:
             self.logger.error(f"Файл не найден: {file_path}")
             raise 
@@ -454,14 +528,14 @@ class DataBaseManager:
             )
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
 
-    def load_data(self, table_name: str) -> Dict[str, float]:
+    def load_data(self, constraints: str) -> Dict[str, float]:
         """Загружает данные таблицы в Treeview."""
-        self.logger.info(f"Начинаем загрузку данных таблицы '{table_name}'")
+        self.logger.info(f"Начинаем загрузку данных таблицы ограничения'{constraints}'")
 
         try:
-            if self._check_exist_table(table_name):
+            if self._check_exist_table(constraints):
                 with sqlite3.connect(self.db_path) as conn:
-                    df = pd.read_sql_query(f"SELECT parameters FROM 'Initial_Data' WHERE table_name = '{table_name}'", conn)
+                    df = pd.read_sql_query(f"SELECT parameters FROM 'Initial_Data' WHERE table_name = '{constraints}'", conn)
                     self.logger.debug(f"Загружены данные: \n{df.to_string()}")
 
                     parameters_json = df['parameters'].loc[0]  # '{"kv": 50, "lines_count": 1}'
@@ -469,20 +543,20 @@ class DataBaseManager:
                     # Преобразуем JSON-строку в словарь
                     row_dict = json.loads(parameters_json)
 
-                self.logger.info(f"Данные таблицы '{table_name}' успешно загружены")
+                self.logger.info(f"Ограничения'{constraints}'для таблицы  успешно загружены")
                 return row_dict
             else:
-                self.logger.info(f"Таблицы '{table_name}' не существует инициализируем пустой")
+                self.logger.info(f"Ограничения '{constraints}' не существует инициализируем пустой")
                 return None
 
         except sqlite3.OperationalError as e:
-            self.logger.error(f"Ошибка загрузки таблицы '{table_name}': {e}")
+            self.logger.error(f"Ошибка загрузки таблицы '{constraints}': {e}")
             messagebox.showerror("Ошибка", f"Не удалось загрузить таблицу: {e}")
             return []
 
         except Exception as e:
             self.logger.exception(
-                f"Неожиданная ошибка при загрузке таблицы '{table_name}'"
+                f"Неожиданная ошибка при загрузке таблицы '{constraints}'"
             )
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
             return []
@@ -549,7 +623,7 @@ class DataBaseManager:
                 raise ValueError("Параметры не определены")
 
             # Создаем JSON из параметров для хранения в одной колонке
-            import json
+            
             parameters_json = json.dumps(parametr_table, ensure_ascii=False)
             
             # Подготавливаем данные
@@ -592,7 +666,7 @@ class DataBaseManager:
             create_table_query = f'CREATE TABLE IF NOT EXISTS \"{name_P_out}\" (table_name TEXT,{column_definitions})'
             cursor.execute(create_table_query)
             # Добавляем данные из DataFrame
-            df.to_sql(name_P_out, conn, if_exists="replace", index=index_flag,index_label =  "table_name")
+            df.to_sql(name_P_out, conn, if_exists="replace", index=index_flag)
         self.logger.info(f"Промежуточная таблица {name_P_out=} сохранена в базе данных")
 
 class JsonManager:
