@@ -74,7 +74,11 @@ def calc( pipe_diameter_mm, pipe_wall_thickness_mm, gas_pressure_mpa, gas_temper
 
 def data_frame(P_in,t_in,gas_compositio):
     # Загрузка данных
-    df = pd.read_csv("SostavGaza.csv")
+    import os
+    # Определяем путь к файлу относительно корня проекта
+    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    csv_path = os.path.join(current_dir, "data", "input", "SostavGaza.csv")
+    df = pd.read_csv(csv_path)
     
     # Преобразование в DataFrame
     data = pd.DataFrame(list(gas_compositio.items()), columns=["Компонент", "Содержание (%)"])

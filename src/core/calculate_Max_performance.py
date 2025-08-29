@@ -1,6 +1,6 @@
 import logging
-import Calculate_file
-from DataModel import CSVManager, Data_model, DataBaseManager, DataStorage, JsonManager
+import core.Calculate_file as Calculate_file
+from core.DataModel import CSVManager, Data_model, DataBaseManager, DataStorage, JsonManager
 import pandas as pd
 from typing import Dict, Any, List, Tuple
 import time

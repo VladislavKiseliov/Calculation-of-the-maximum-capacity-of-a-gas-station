@@ -1,7 +1,61 @@
+# Логи и временные файлы
 logs/
+*.log
+*.log.*
+
+# Python cache и compiled файлы
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Базы данных и пользовательские данные
+*.db
+*.sqlite
+*.sqlite3
 tables/
+data/database/*.db
+
+# Пользовательские сохранения
 saves/
+data/output/*.xlsx
+data/output/*.csv
+
+# Архивы и тесты
+archive/
+tests_old/
 Arhive/
 Teste/
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Виртуальные окружения
+venv/
+env/
+.env
+.venv
+
+# Конфигурационные файлы с паролями
+config/local_settings.json
+config/secrets.json
+
+# Временные файлы
+*.tmp
+*.temp
+*.bak
+*.backup
 

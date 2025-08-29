@@ -1,0 +1,38 @@
+{
+    "application": {
+        "name": "Gas Station Capacity Calculator",
+        "version": "1.0.0",
+        "author": "Your Name"
+    },
+    "paths": {
+        "data_dir": "data",
+        "input_dir": "data/input",
+        "output_dir": "data/output",
+        "database_dir": "data/database",
+        "logs_dir": "logs",
+        "saves_dir": "saves"
+    },
+    "database": {
+        "filename": "tables.db",
+        "backup_enabled": true,
+        "backup_interval_hours": 24
+    },
+    "gui": {
+        "window_title": "Расчеты газовых систем",
+        "initial_size": [700, 300],
+        "min_size": [700, 300],
+        "theme": "clam"
+    },
+    "calculations": {
+        "precision": 6,
+        "cache_enabled": true,
+        "max_cache_size": 1000
+    },
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        "file_rotation": true,
+        "max_file_size_mb": 10,
+        "backup_count": 5
+    }
+}

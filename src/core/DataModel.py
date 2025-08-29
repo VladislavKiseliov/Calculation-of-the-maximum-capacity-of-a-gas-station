@@ -10,11 +10,17 @@ from tkinter.messagebox import showinfo, showwarning
 from typing import Any, Dict, List
 import pickle
 import json
+import base64
+import sys
 
 import numpy as np
 import pandas as pd
 
-from Work_table import BaseTableManager
+from gui.Work_table import BaseTableManager
+
+# Create module alias for backward compatibility with pickled objects
+# This allows pickle to find the old module structure when deserializing
+sys.modules['Work_table'] = sys.modules['gui.Work_table']
 
 
 class Data_model:
@@ -451,9 +457,12 @@ class DataBaseManager:
 
     def __init__(self):
         self.logger = logging.getLogger("App.DataBaseManager")  # Дочерний логгер
-        self.db_path = "tables.db"  # Путь к файлу базы данных SQLite
-        if os.path.exists("tables.db"):
-            os.remove("tables.db")
+        # Определяем путь к базе данных относительно корня проекта
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        self.db_path = os.path.join(current_dir, "data", "database", "tables.db")
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
         self._create_initial_data_table()
     
     def _create_initial_data_table(self):
@@ -679,7 +688,10 @@ class JsonManager:
 
     def __init__(self):
         self.logger = logging.getLogger("App.JsonManager")  # Дочерний логгер
-        self.saves_dir = "Saves"
+        # Определяем путь к папке сохранений относительно корня проекта
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        self.saves_dir = os.path.join(current_dir, "saves")
 
     def save_configure(self, data):
         
@@ -722,7 +734,10 @@ class DataStorage:
         self.tables_data = {}
         self.gas_properties = {}
         self._temperature = {}
-        self.db_path = "tables.db"
+        # Определяем путь к базе данных относительно корня проекта
+        import os
+        current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        self.db_path = os.path.join(current_dir, "data", "database", "tables.db")
 
     @property
     def data_gas_composition(self) -> Dict[str, float]:

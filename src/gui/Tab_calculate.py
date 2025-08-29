@@ -1,3 +1,7 @@
+import tkinter as tk
+from tkinter import ttk
+import core.Calculate_file as Calculate_file
+from gui.Work_table import WidgetFactory
 
 
 
