@@ -2,7 +2,7 @@ import logging
 import Calculate_file
 from DataModel import CSVManager, Data_model, DataBaseManager, DataStorage, JsonManager
 import pandas as pd
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, List, Tuple
 import time
 from functools import lru_cache
 
@@ -68,12 +68,59 @@ class Max_performance:
             self.logger.error(f"Ошибка расчета регулятора (Pin={col_pressure}, Pout={p_out}): {e}")
             raise
     
-    def _calculate_heat_balanc(self,df: pd.DataFrame):
+    def _calculate_heat_balanc(self, col_pressure: float, p_out: float):
+        """Расчет теплового баланса с использованием загруженных данных котельной"""
+        self.logger.debug(f"Расчет теплового баланса из файла: Pin={col_pressure} МПа, Pout={p_out} МПа")
         
-        
-        
-        
-        pass
+        try:
+            # Получаем данные котельной из базы данных
+            boiler_data = self.model.get_table_data("Boiler_data")
+            
+            if not boiler_data:
+                self.logger.error("Данные котельной не найдены в базе данных")
+                raise ValueError("Данные котельной не загружены")
+            
+            # Формируем ключи для поиска данных
+            col_name = f"Pin_{str(col_pressure).replace('.', '_')}"
+            row_key = f"Pout_{p_out}"
+            
+            # Ищем соответствующую строку по выходному давлению
+            target_row = None
+            for row in boiler_data:
+                if row.get('index') == row_key:  # index содержит Pout_X.X
+                    target_row = row
+                    break
+            
+            if not target_row:
+                self.logger.warning(f"Данные для Pout={p_out} не найдены, используем ближайшие значения")
+                # Попытка найти ближайшее значение давления
+                target_row = self._find_nearest_pressure_data(boiler_data, p_out)
+            
+            if not target_row:
+                self.logger.error(f"Не удалось найти данные котельной для Pout={p_out}")
+                raise ValueError(f"Данные для выходного давления {p_out} МПа не найдены")
+            
+            # Извлекаем данные для конкретного входного давления
+            if col_name not in target_row:
+                self.logger.warning(f"Данные для Pin={col_pressure} не найдены, используем интерполяцию")
+                result = self._interpolate_boiler_data(target_row, col_pressure)
+            else:
+                # Парсим JSON данные из ячейки
+                import json
+                cell_data = json.loads(target_row[col_name])
+                nm3h = cell_data['Nm3h']
+                c_value = cell_data['C']
+                
+                self.logger.debug(f"Найдены данные котельной: Nm3h={nm3h}, C={c_value}")
+                result = float(nm3h)  # Возвращаем расход
+            
+            self.logger.debug(f"Расчет теплового баланса завершен: результат={result:.6f}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Ошибка расчета теплового баланса из файла (Pin={col_pressure}, Pout={p_out}): {e}")
+            # Fallback к стандартному расчету
+            return self._calculate_heat_balance_fallback(col_pressure, p_out)
 
 
 
@@ -143,7 +190,8 @@ class Max_performance:
 
                     
                 case "Таблица котельной":
-                    result = self._calculate_heat_balance(col_pressure, P_out, data)
+                    result = self._calculate_heat_balanc(col_pressure, P_out)
+                    # result = self._calculate_heat_balance(col_pressure, P_out, data)
                     self.logger.debug(f"Котельная: {result}")
                     
                 case _:

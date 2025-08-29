@@ -68,3 +68,7 @@ print(tables)
 tables.update(tabl)
 
 print(tables)
+
+
+init_data = "-" * 9
+print(f"{init_data=}")

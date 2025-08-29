@@ -159,13 +159,14 @@ class Data_model:
             )
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
   
-    def get_table_data(self, table_name) -> Dict[str, float]:
+    def get_table_data(self, table_name) -> List[Dict[str, Any]]:
         df = self.data_base_manager.get_data_table("Boiler_data")
-        print(f"{df=}")
+        # print(f"{df['index']=}")
+        # print(f"{df['Pin_6_0']=}")
         return self.data_base_manager.load_data(table_name)
 
-    def save_table(self,data):
-        self.data_storage.table_manager.update(data)
+    def save_table(self,dtables: Dict[str, BaseTableManager]):
+        self.data_storage.table_manager.update(dtables)
     
     def save_intermedia(self,df:pd.DataFrame,name_table:str,index_flag = False):
         self.data_base_manager.save(df,name_table,index_flag)
@@ -290,7 +291,7 @@ class Data_model:
 
             # Группируем по выходному давлению (MPAout)
             grouped = df_processed.groupby('OutputPressure')
-            print(f"{grouped=}")
+
 
             # Создаем пустой DataFrame для всех данных
             result_df = pd.DataFrame()
@@ -329,9 +330,13 @@ class Data_model:
             
             print("Итоговая таблица:")
             print(result_df)
+        
                 
                 # Сохраняем преобразованные данные
             self.save_intermedia(result_df, "Boiler_data",True)
+
+            a=self.get_table_data("Boiler_data")
+            print(f"{a=}")
  
                     
         # except Exception as e:
@@ -650,9 +655,9 @@ class DataBaseManager:
         with sqlite3.connect(self.db_path) as conn:
             df = pd.read_sql_query(f'SELECT * FROM "{name_table}"', conn)
             self.logger.info(f"Данные таблицы {name_table} полученны из баззы данных")
-            print(f"{df.to_dict(orient="records")=}")
+            # print(f"{df.to_dict(orient="records")=}")
         
-        return df.to_dict(orient="records")[0]  # Список словарей
+        return df.to_dict(orient="records")  # Список словарей
     
     def save(self,df,name_P_out,index_flag = False):
 

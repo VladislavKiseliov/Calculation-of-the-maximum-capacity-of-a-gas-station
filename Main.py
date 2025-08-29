@@ -406,7 +406,7 @@ class GuiTable:
     )
         self.row += 1 
 
-    def open_table_window(self, table_name,colomn,data):
+    def open_table_window(self, table_name:str,colomn : list,data : Dict[str,float]):
         self.table_name = table_name
         """Открывает окно с таблицей."""
         logger.info(f"Открытие окна таблицы '{self.table_name}'")
@@ -533,7 +533,7 @@ class TableController:
         if table_type == "Таблица котельной":
            self.loda_boiler_data()
         else:
-            data = self.model.get_table_data(table_name)
+            data = self.model.get_table_data(table_name)[0]
             self.guitable.open_table_window(table_name,self.tables[table_name].get_columns(),data)
  
     def save_table(self):
