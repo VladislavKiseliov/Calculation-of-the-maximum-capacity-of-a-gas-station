@@ -165,15 +165,13 @@ pip install pandas numpy matplotlib
 ### Быстрая установка
 1. **Клонирование репозитория**:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/yourusername/Calculation-of-the-maximum-capacity-of-a-gas-station.git
    cd Calculation-of-the-maximum-capacity-of-a-gas-station
    ```
 
 2. **Установка зависимостей**:
    ```bash
-   pip install -r requirements.txt  # если доступен
-   # или вручную:
-   pip install pandas numpy matplotlib
+   pip install -r requirements.txt
    ```
 
 3. **Запуск приложения**:

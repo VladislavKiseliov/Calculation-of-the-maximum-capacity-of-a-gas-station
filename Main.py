@@ -9,14 +9,20 @@ if src_path not in sys.path:
 
 def main():
     """
-    Главная функция запуска приложения.
+    Главная функция запуска приложения с новой модульной структурой.
     """
     try:
         # Создаем корневое окно
         root = tk.Tk()
         
-        # Импортируем и инициализируем главные классы
-        from gui.Main import GuiManager, CallbackRegistry, Initial_data,TableController,Сontroller,GuiTable
+        # Импортируем компоненты из новой структуры
+        from gui.main_window import GuiManager, CallbackRegistry
+        from gui.components.initial_data import Initial_data
+        from gui.controllers.main_controller import MainController
+        from gui.controllers.table_controller import TableController
+        from gui.tables.table_gui import GuiTable
+        from gui.calculations.gas_properties import Calculation_gas_properties
+        
         from core.DataModel import Data_model, DataStorage, CSVManager, DataBaseManager, JsonManager
         from core.calculate_Max_performance import Max_performance
         from utils.logger_config import setup_logger, create_log_file
@@ -48,16 +54,24 @@ def main():
         root.grid_rowconfigure(0, weight=1)
         root.grid_columnconfigure(0, weight=1)
         
-        
-        
-        # Инициализируем начальные данные
+        # Инициализируем компоненты GUI
         initial_data_frame = gui_manager.get_tab_frame("Исходные данные")
         initial_data = Initial_data(initial_data_frame, callback_registry)
         
-        guitable = GuiTable(initial_data_frame, callback_registry)
-
-        table_controller = TableController(guitable, callback_registry,data_model)
-        controller = Сontroller(initial_data, data_model, callback_registry,table_controller,max_performance)
+        # Создаем GUI компоненты для таблиц
+        gui_table = GuiTable(initial_data_frame, callback_registry)
+        
+        # Создаем контроллеры
+        table_controller = TableController(gui_table, callback_registry, data_model)
+        main_controller = MainController(
+            initial_data, data_model, callback_registry, 
+            table_controller, max_performance
+        )
+        
+        # Инициализируем компоненты расчетов
+        gas_properties_frame = gui_manager.get_tab_frame("Свойства газа")
+        gas_properties = Calculation_gas_properties(gas_properties_frame, data_model)
+        
         logger.info("Приложение успешно инициализировано")
         
         # Запускаем главный цикл приложения

@@ -1,14 +1,18 @@
-# Основные зависимости для приложения расчета ГРС
+# Core dependencies for GRS Capacity Calculator
 pandas>=1.3.0
 numpy>=1.21.0
-matplotlib>=3.4.0
-openpyxl>=3.0.0
+matplotlib>=3.5.0
 
-# GUI библиотеки (tkinter обычно включен в Python)
-# tkinter - встроенный модуль
+# GUI framework (usually included with Python)
+# tkinter - comes with standard Python installation
 
-# Дополнительные библиотеки для разработки
-# pytest>=6.0.0          # для тестирования
-# black>=21.0.0           # для форматирования кода
-# flake8>=3.9.0           # для проверки стиля кода
-# mypy>=0.910             # для проверки типов
+# Database support
+# sqlite3 - comes with standard Python installation
+
+# Standard library dependencies used:
+# os, sys, json, logging, datetime - all included with Python
+
+# Development dependencies (optional)
+# pytest>=6.0.0  # for testing
+# black>=22.0.0   # for code formatting
+# flake8>=4.0.0   # for linting
