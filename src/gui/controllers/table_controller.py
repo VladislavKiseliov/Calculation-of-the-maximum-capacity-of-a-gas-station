@@ -12,7 +12,9 @@ import logging
 from tkinter import messagebox
 from tkinter.messagebox import showinfo
 from typing import Dict
+from tkinter import filedialog, messagebox
 
+from utils.GetFilePatch import GetFilePatch
 from gui.Work_table import BaseTableManager, TableFactory
 
 
@@ -90,11 +92,13 @@ class TableController:
 
     def load_boiler_data(self):
         """Load boiler data from external file with comprehensive error handling."""
+
         try:
-            self.model.load_boiler_data()
+            file_path = GetFilePatch.get_file_patch_csv()
+            self.model.load_boiler_data(file_path)
             self.logger.info("Все данные успешно обработаны и сохранены")
             showinfo("Успех", "Данные котельной успешно загружены и обработаны!")
-            
+
         except FileNotFoundError:
             messagebox.showerror("Ошибка", "Выбранный файл не найден")
             return

@@ -16,7 +16,9 @@ from typing import Dict
 import pandas as pd
 import matplotlib.pyplot as plt
 from tkinter.messagebox import showinfo, showwarning
+from tkinter import filedialog, messagebox
 
+from utils.GetFilePatch import GetFilePatch
 from ..main_window import CallbackRegistry
 
 
@@ -132,15 +134,32 @@ class MainController:
 
         self.initial_data.gas_window.destroy()
 
+
     def load_sostav_gaz_csv(self):
         """Load gas composition data from CSV file."""
-        data = self.model.load_gaz_from_csv()
-        for component, entry in self.initial_data.entries.items():
-            if component in data:
-                entry.delete(0, tk.END)
-                entry.insert(0, str(data[component]))
-                self.initial_data.update_total_percentage()
-    
+        try:
+
+            file_path = GetFilePatch.get_file_patch_csv()
+            # Открываем проводник для выбора файла
+            data = self.model.load_gaz_from_csv(file_path)
+
+            for component, entry in self.initial_data.entries.items():
+                if component in data:
+                    entry.delete(0, tk.END)
+                    entry.insert(0, str(data[component]))
+                    self.initial_data.update_total_percentage()
+
+        except FileNotFoundError:
+            messagebox.showerror("Отмена", "Сохранение отменено пользователем")
+
+        except Exception as e:
+            # Обрабатываем ошибки при загрузке
+            self.logger.error("Ошибка", f"Не удалось загрузить из файла: {e}")
+            showwarning("Ошибка", f"Не удалось загрузить данные из файла: {e}")
+
+
+
+
     def create_window_temperature(self):
         """Create temperature input window with existing values."""
         self.initial_data.create_window_temperature()

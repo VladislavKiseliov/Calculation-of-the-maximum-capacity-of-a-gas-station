@@ -13,10 +13,12 @@ import json
 import base64
 import sys
 
+
 import numpy as np
 import pandas as pd
 
 from gui.Work_table import BaseTableManager
+from utils.GetFilePatch import GetFilePatch
 
 # Create module alias for backward compatibility with pickled objects
 # This allows pickle to find the old module structure when deserializing
@@ -136,8 +138,8 @@ class Data_model:
         gas_composition = self.validate_gaz_composition(composition)
         self.csv_manager.save_gas_composition_to_csv(gas_composition)
 
-    def load_gaz_from_csv(self):  # Исправить на класс работы с csv
-        return self.csv_manager.load_gas_composition_from_csv()
+    def load_gaz_from_csv(self,file_path) -> Dict[str, float]:  # Исправить на класс работы с csv
+        return self.csv_manager.load_gas_composition_from_csv(file_path)
 
     # Работа с температурной
     def save_temp(self, temperature_dict : Dict[str, float]):
@@ -231,44 +233,17 @@ class Data_model:
         except Exception as e:
             self.logger.exception(f"Ошибка при открытии конфигурации - {e}")
             showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
-    
+
     # Сохранение/загрузка конфигурации расчета
-    def load_boiler_data(self):
+    def load_boiler_data(self, file_path):
         """
         Загружает и обрабатывает данные котельной из CSV файла.
         """
-        # Сначала проверяем, выбрал ли пользователь файл
-        file_path = filedialog.askopenfilename(
-            title="Выберите файл для загрузки данных котельной",
-            filetypes=[
-                ("CSV files", "*.csv"),
-                ("All files", "*.*"),
-            ],
-        )
-        
-        if not file_path:  # Если пользователь отменил выбор
-            self.logger.warning("Отмена. Сохранение отменено пользователем")
-            showwarning("Отмена", "Сохранение отменено пользователем")
-            return
-
         try:
-            # Пробуем разные кодировки
-            encodings = ['utf-8', 'windows-1251', 'cp1251', 'utf-8-sig']
-            df_raw = None
-            used_encoding = None
-            
-            for encoding in encodings:
-                try:
-                    df_raw = pd.read_csv(file_path, delimiter=';', skiprows=2, encoding=encoding)
-                    used_encoding = encoding
-                    self.logger.info(f"Файл успешно прочитан с кодировкой: {encoding}")
-                    break
-                except UnicodeDecodeError:
-                    continue
-            
-            if df_raw is None:
-                raise ValueError("Не удалось определить кодировку файла")
-            
+            encoding = GetFilePatch.detect_encoding(file_path)
+            df_raw = pd.read_csv(file_path, delimiter=';', skiprows=2, encoding=encoding)
+
+
             # Удаляем строки "Максимум" и "Минимум" (проверяем по первому столбцу)
             mask = ~df_raw.iloc[:, 0].isin(['Максимум', 'Минимум'])
             df_raw = df_raw[mask]
@@ -402,29 +377,9 @@ class CSVManager:
             # Обрабатываем ошибки при сохранении
             showwarning("Ошибка", f"Не удалось сохранить в файл: {e}")
 
-    def load_gas_composition_from_csv(self) -> Dict[str, float]:
+    def load_gas_composition_from_csv(self,file_path) -> Dict[str, float]:
         """Loads the gas composition from a CSV file"""
         try:
-            # Открываем проводник для выбора файла
-            file_path = filedialog.askopenfilename(
-                title="Выберите файл для загрузки состава газа",
-                filetypes=[
-                    ("CSV files", "*.csv"),
-                    ("All files", "*.*"),
-                ],  # Фильтр типов файлов
-            )
-
-            if not file_path:  # Если пользователь отменил выбор
-                showwarning("Отмена", "Загрузка отменена пользователем")
-                self.logger.warning("Отмена", "Загрузка отменена пользователем")
-                return
-
-            # Проверяем существование файла
-            if not os.path.exists(file_path):
-                showwarning("Ошибка", f"Файл {file_path} не найден.")
-                self.logger.error("Ошибка", f"Файл {file_path} не найден.")
-                return
-
             # Загружаем данные из выбранного файла
             with open(file_path, mode="r", encoding="utf-8") as csvfile:
                 reader = csv.DictReader(csvfile)
@@ -441,16 +396,11 @@ class CSVManager:
                         )
 
                 # Устанавливаем состав газа в модели и обновляем поля ввода
+                self.logger.info(f"Состав газа загружен из файла: {file_path}")
                 return loaded_composition
 
-            # Уведомляем пользователя об успешной загрузке
-            showinfo("Успех", f"Состав газа загружен из файла: {file_path}")
-            self.logger.info(f"Состав газа загружен из файла: {file_path}")
-
-        except Exception as e:
-            # Обрабатываем ошибки при загрузке
-            self.logger.error("Ошибка", f"Не удалось загрузить из файла: {e}")
-            showwarning("Ошибка", f"Не удалось загрузить из файла: {e}")
+        except Exception:
+            raise
 
 class DataBaseManager:
     """Работа с базой данных SQL_Lite"""
