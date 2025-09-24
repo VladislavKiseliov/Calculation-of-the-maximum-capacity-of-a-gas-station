@@ -41,42 +41,42 @@ class Data_model:
         self.json_manager = json_manager
         self.saves_dir = "Saves"
 
-    # Раюота с давлением
-    def _calculate_pressure_range(
-        self, min_pressure:float,max_pressure:float,step:float) -> List[float]:
+    # Работа с давлением
+    def _calculate_pressure_range(self, pressure :Dict[str,float]) -> List[float]:
         try:
+            min_pressure = pressure["Минимальное давление"]
+            max_pressure = pressure["Максимальное давление"]
+            step = pressure["Шаг значения"]
             # Проверка корректности данных
             if min_pressure > max_pressure:
                 raise ValueError("Ошибка: Минимальное давление больше максимального.")
             if step <= 0:
                 raise ValueError("Ошибка: Шаг должен быть положительным числом.")
             if min_pressure + step > max_pressure:
-                raise ValueError("Ошибка: Диапазон не коректен")
-                
+                raise ValueError("Ошибка: Диапазон не корректен")
 
             pressure_range = np.arange(min_pressure, max_pressure + step, step).tolist()
-            
-            return [round(p, 1) for p in pressure_range]
 
+            return [round(p, 1) for p in pressure_range]
         except ValueError:
             raise
 
-    def save_pressure_range1(self, title: str, min_pressure:float,max_pressure:float,step:float):
+    def save_pressure_range(self, title: str, pressure :Dict[str,float]):
         """
         Сохраняет диапазон давлений.
         """
         try:
             pressure_type = title.lower()
-            set_pressure_range = self._calculate_pressure_range(min_pressure, max_pressure, step)
-            
+            set_pressure_range = self._calculate_pressure_range(pressure)
             self.data_storage.set_pressure_range(pressure_type, set_pressure_range)
 
             self.logger.info(
                 f"Диапазоны {pressure_type} давления  успешно сохранены: максимальное = %s мПа, минимальное = %s мПа,шаг = %s",
-                max_pressure,
-                min_pressure,
-                step,
+                min(set_pressure_range),
+                max(set_pressure_range),
+                round(set_pressure_range[1] - set_pressure_range[0], 2),
             )
+
         except ValueError as e:
             self.logger.warning(f"Ошибка при расчете диапазона {title} давление {e}")
             raise 

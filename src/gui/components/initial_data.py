@@ -12,9 +12,10 @@ import contextlib
 import math
 import tkinter as tk
 from tkinter import ttk
-from typing import Dict
+from typing import Dict, List
 
 from ..main_window import WidgetFactory, CallbackRegistry
+from tkinter.messagebox import showinfo, showwarning
 
 
 class Initial_data:
@@ -178,7 +179,7 @@ class Initial_data:
         # Update total label
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
-    def create_window_temperature(self):
+    def create_window_temperature(self,init_temperature):
         """Create temperature input dialog window."""
         self.temperature_entries = {}
         self.temp_window = tk.Toplevel(self.parent)
@@ -195,6 +196,10 @@ class Initial_data:
             entry = WidgetFactory.create_entry(parent=self.temp_window, row=idx)
             self.temperature_entries[title] = entry
 
+        if init_temperature:
+            self.temperature_entries["input"].insert(0, init_temperature["input"])
+            self.temperature_entries["output"].insert(0, init_temperature["output"])
+
         # Create save button
         save_temperature_button = WidgetFactory.create_Button(
             parent=self.temp_window,
@@ -203,7 +208,7 @@ class Initial_data:
             function=lambda: self.callback.trigger("save_temperature")
         )
 
-    def create_window_pressure(self, title):
+    def create_window_pressure(self, title,init_pressure : List[float]):
         """Create pressure range input dialog window."""
         self.title = title
         self.pressure_window = tk.Toplevel(self.parent)
@@ -219,6 +224,17 @@ class Initial_data:
             )
             entry = WidgetFactory.create_entry(self.pressure_window, row=i, column=1)
             self.pressure_entries[labels[i]] = entry
+        if init_pressure:
+            self.pressure_entries["Минимальное давление"].insert(
+                0, min(init_pressure)
+            )
+            self.pressure_entries["Максимальное давление"].insert(
+                0, max(init_pressure)
+            )
+            self.pressure_entries["Шаг значения"].insert(
+                0, round(init_pressure[1] - init_pressure[0], 2)
+            )
+
 
         # Create save button
         self.save_button = WidgetFactory.create_Button(
@@ -227,3 +243,46 @@ class Initial_data:
             row=4,
             function=lambda: self.callback.trigger("save_pressure_range")
         )
+
+    def get_data_component(self, component:str) -> Dict[str, float]:
+        """Get data from gas station data."""
+        if component == "pressure":
+            try:
+                data = {}
+                for component, entry in self.pressure_entries.items():
+                    if pressure := self.pressure_entries[component].get():
+                        data[component] = float(entry.get().replace(",", "."))
+                    else:
+                        showwarning("Ошибка", f"Введите значение для {component}")
+                        return
+                return data
+            except ValueError as e:
+                showwarning("Ошибка", f"Введите корректные числовые значения! {e}")
+                return
+
+
+        elif component == "temperature":
+            data = {}
+            for component in self.temperature_entries:
+                if temperature := self.temperature_entries[component].get():
+                    data[component] = float(temperature.replace(",", "."))
+                else:
+                    showwarning("Ошибка", f"Введите значение для {component}")
+                    return
+
+            return data
+
+        elif component == "SostavGaz":
+            data = {}
+            for component, entry in self.temperature_entries.items():
+                try:
+                    data[component] = float(entry.get().replace(",", "."))
+                except ValueError:
+                    data[component] = 0.0
+
+            return  data
+        else:
+            return {}
+
+
+
