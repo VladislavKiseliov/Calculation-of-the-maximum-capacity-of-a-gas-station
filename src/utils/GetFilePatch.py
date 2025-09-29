@@ -1,23 +1,31 @@
 from tkinter import filedialog
 import pandas as pd
 import chardet
+from typing import Optional
 
 
 class GetFilePatch:
     @staticmethod
-    def get_file_patch_csv():
+    def get_file_patch_csv(title:str) ->  Optional[str]:
         # Сначала проверяем, выбрал ли пользователь файл
         try:
             file_path = filedialog.askopenfilename(
-                title="Выберите файл для загрузки данных котельной",
+                title=title,
+                defaultextension=".csv",  # Расширение по умолчанию
                 filetypes=[
                     ("CSV files", "*.csv"),
                     ("All files", "*.*"),
                 ],
             )
+            # Проверяем, выбрал ли пользователь файл
+            if not file_path:
+                return None
             return file_path
+
         except FileNotFoundError:
-            raise
+            raise FileNotFoundError("Файл не найден")
+        except Exception as e:
+            raise Exception(f"Произошла ошибка при выборе файла: {str(e)}")
 
 class CheckEncodingFile:
     @staticmethod

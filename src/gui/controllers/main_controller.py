@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from tkinter.messagebox import showinfo, showwarning
 from tkinter import filedialog, messagebox
 
-from utils.GetFilePatch import GetFilePatch
+from utils import *
 from ..main_window import CallbackRegistry
 
 
@@ -47,9 +47,9 @@ class MainController:
         """Register all application callbacks with the callback registry."""
         # Gas composition callbacks
         self.callback.register("save_gas_composition", self.gaz_window)
-        self.callback.register("save_sostav_gaz", lambda: self.save_sostav_gaz(self.initial_data.entries))
+        self.callback.register("save_sostav_gaz",self.save_sostav_gaz)
         self.callback.register("save_gas_composition_to_csv", 
-                              lambda: self.save_sostav_gaz(entries=self.initial_data.entries, to_csv=True))
+                              lambda: self.save_sostav_gaz(to_csv=True))
         self.callback.register("load_gas_composition_to_csv", self.load_sostav_gaz_csv)
 
         # Pressure range callbacks
@@ -99,18 +99,31 @@ class MainController:
         except Exception as e:
             self.logger.error("Ошибка", f"Не удалось открыть окно состава газа: {e}")
 
-    def save_sostav_gaz(self, entries: Dict[str, tk.Entry], to_csv=False):
+    def save_sostav_gaz(self, to_csv=False):
         """Save gas composition data to model and optionally to CSV."""
         try:
-            data = self.initial_data.get_data_component("sostav_gaz")
-            print(f"Cстав газа {data=}")
-            self.model.save_sostav_gaz(data)
+            gas_composition = self.initial_data.get_data_component("gas_composition")
+            print(f"Cстав газа {gas_composition=}")
+            self.model.save_sostav_gaz(gas_composition)
 
             if to_csv:
-                self.model.save_gaz_to_csv(data)
+                file_path = GetFilePatch.get_file_patch_csv(title="Сохранить состав газа")
+                if file_path:
+                    self.model.save_gaz_to_csv(gas_composition,file_path)
+                else:
+                    showwarning("Предупреждение", "Не выбран файл для сохранения")
+                    return
+
+            # Уведомляем пользователя об успешном сохранении
+            showinfo("Успех", f"Состав газа сохранен")
+
+        except FileNotFoundError as fnf_error:
+            self.logger.error("Ошибка", f"Файл не найден {fnf_error}")
+            return
 
         except Exception as e:
             self.logger.error("Ошибка", f"Не удалось открыть окно состава газа: {e}")
+            showwarning("Ошибка", f"Не удалось сохранить в файл: {e}")
 
         self.initial_data.gas_window.destroy()
 
@@ -120,12 +133,7 @@ class MainController:
 
             file_path = GetFilePatch.get_file_patch_csv()
             data = self.model.load_gaz_from_csv(file_path)
-
-            for component, entry in self.initial_data.entries.items():
-                if component in data:
-                    entry.delete(0, tk.END)
-                    entry.insert(0, str(data[component]))
-                    self.initial_data.update_total_percentage()
+            self.initial_data.load_gas_composition_to_csv(data)
 
         except FileNotFoundError:
             messagebox.showerror("Отмена", "Сохранение отменено пользователем")

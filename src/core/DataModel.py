@@ -16,9 +16,10 @@ import sys
 
 import numpy as np
 import pandas as pd
+from matplotlib.pyplot import title
 
 from gui.Work_table import BaseTableManager
-from utils.GetFilePatch import GetFilePatch
+# from utils import *
 
 # Create module alias for backward compatibility with pickled objects
 # This allows pickle to find the old module structure when deserializing
@@ -61,12 +62,12 @@ class Data_model:
         except ValueError:
             raise
 
-    def save_pressure_range(self, title: str, pressure :Dict[str,float]):
+    def save_pressure_range(self, pressure_type: str, pressure :Dict[str,float]):
         """
         Сохраняет диапазон давлений.
         """
         try:
-            pressure_type = title.lower()
+            pressure_type = pressure_type.lower()
             set_pressure_range = self._calculate_pressure_range(pressure)
             self.data_storage.set_pressure_range(pressure_type, set_pressure_range)
 
@@ -78,18 +79,18 @@ class Data_model:
             )
 
         except ValueError as e:
-            self.logger.warning(f"Ошибка при расчете диапазона {title} давление {e}")
+            self.logger.warning(f"Ошибка при расчете диапазона {pressure_type} давление {e}")
             raise 
 
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранение давления - {e}")
             raise
 
-    def get_pressure_range(self, title: str) -> List[float]:
+    def get_pressure_range(self, pressure_type: str) -> List[float]:
         """
         Получает диапазон давлений.
         """
-        pressure_type = title.lower()
+        pressure_type = pressure_type.lower()
         return (
             self.data_storage.get_input_pressure_range()
             if pressure_type == "input"
@@ -101,7 +102,7 @@ class Data_model:
         """Loads the gas composition from the data model and updates the entry fields."""
         return self.data_storage.data_gas_composition
 
-    def validate_gaz_composition(self, composition: Dict[str, str]) -> Dict[str, float]:
+    def _validate_gaz_composition(self, composition: Dict[str, str]) -> Dict[str, float]:
         total_percentage = 0.0
         gas_composition = {}  # Очищаем словарь, что бы не накладывало значения
         for component, percentage in composition.items():
@@ -131,14 +132,14 @@ class Data_model:
         return gas_composition
 
     def save_sostav_gaz(self,  composition: Dict[str, str]):
-        gas_composition = self.validate_gaz_composition(composition)
+        gas_composition = self._validate_gaz_composition(composition)
         self.data_storage.data_gas_composition = gas_composition
 
-    def save_gaz_to_csv(self, composition: Dict[str, str]):  # Исправить на класс работы с csv
-        gas_composition = self.validate_gaz_composition(composition)
-        self.csv_manager.save_gas_composition_to_csv(gas_composition)
+    def save_gaz_to_csv(self, composition: Dict[str, str],file_path:str):
+        gas_composition = self._validate_gaz_composition(composition)
+        self.csv_manager.save_gas_composition_to_csv(gas_composition,file_path)
 
-    def load_gaz_from_csv(self,file_path) -> Dict[str, float]:  # Исправить на класс работы с csv
+    def load_gaz_from_csv(self,file_path:str) -> Dict[str, float]:
         return self.csv_manager.load_gas_composition_from_csv(file_path)
 
     # Работа с температурной
@@ -235,7 +236,7 @@ class Data_model:
             showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
 
     # Сохранение/загрузка конфигурации расчета
-    def load_boiler_data(self, file_path):
+    def load_boiler_data(self, file_path:str):
         """
         Загружает и обрабатывает данные котельной из CSV файла.
         """
@@ -343,23 +344,9 @@ class CSVManager:
     def __init__(self):
         self.logger = logging.getLogger("App.CSVManager")  # Дочерний логгер
 
-    def save_gas_composition_to_csv(self, gas_composition: Dict[str, float]):
+    def save_gas_composition_to_csv(self, gas_composition: Dict[str, float],file_path:str):
         """Saves the current gas composition to a CSV file."""
         try:
-            # Открываем проводник для выбора пути и имени файла
-            file_path = filedialog.asksaveasfilename(
-                title="Сохранить состав газа как",
-                defaultextension=".csv",  # Расширение по умолчанию
-                filetypes=[
-                    ("CSV files", "*.csv"),
-                    ("All files", "*.*"),
-                ],  # Фильтр типов файлов
-            )
-
-            if not file_path:  # Если пользователь отменил выбор
-                self.logger.warning("Отмена.Сохранение отменено пользователем")
-                showwarning("Отмена", "Сохранение отменено пользователем")
-                return
 
             # Сохраняем данные в выбранный файл
             with open(file_path, mode="w", newline="", encoding="utf-8") as csvfile:
@@ -371,13 +358,12 @@ class CSVManager:
 
             # Уведомляем пользователя об успешном сохранении
             self.logger.info(f"Состав газа сохранен в файл: {file_path}")
-            showinfo("Успех", f"Состав газа сохранен в файл: {file_path}")
-        except Exception as e:
-            self.logger.error("Ошибка", f"Не удалось сохранить в файл: {e}")
-            # Обрабатываем ошибки при сохранении
-            showwarning("Ошибка", f"Не удалось сохранить в файл: {e}")
 
-    def load_gas_composition_from_csv(self,file_path) -> Dict[str, float]:
+        except Exception as e:
+            raise
+
+
+    def load_gas_composition_from_csv(self,file_path:str) -> Dict[str, float]:
         """Loads the gas composition from a CSV file"""
         try:
             # Загружаем данные из выбранного файла

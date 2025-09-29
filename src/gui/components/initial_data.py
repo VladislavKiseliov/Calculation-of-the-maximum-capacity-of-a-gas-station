@@ -179,6 +179,18 @@ class Initial_data:
         # Update total label
         self.total_label.config(text=f"Сумма: {total:.4f}%")
 
+    def load_gas_composition_to_csv(self,gaz_composition: Dict[str, float]):
+        try:
+            for component, entry in self.entries.items():
+                if component in gaz_composition:
+                    entry.delete(0, tk.END)
+                    entry.insert(0, str(gaz_composition[component]))
+                    self.update_total_percentage()
+            showinfo("Успех", "Состав газа сохранен")
+        except Exception as e:
+            showwarning("Ошибка", f"Не удалось загрузить данные из файла: {e}")
+            raise
+
     def create_window_temperature(self,init_temperature):
         """Create temperature input dialog window."""
         self.temperature_entries = {}
@@ -272,7 +284,7 @@ class Initial_data:
 
             return data
 
-        elif component == "SostavGaz":
+        elif component == "gas_composition":
             data = {}
             for component, entry in self.temperature_entries.items():
                 try:
