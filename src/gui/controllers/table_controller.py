@@ -14,7 +14,7 @@ from tkinter.messagebox import showinfo
 from typing import Dict
 from tkinter import filedialog, messagebox
 
-from utils.GetFilePatch import GetFilePatch
+from utils import *
 from gui.Work_table import BaseTableManager, TableFactory
 
 
@@ -94,8 +94,15 @@ class TableController:
         """Load boiler data from external file with comprehensive error handling."""
 
         try:
-            file_path = GetFilePatch.get_file_patch_csv()
-            self.model.load_boiler_data(file_path)
+            file_path = GetFilePatch.get_file_patch_csv("Выберете файл данных для котельной") # Получаем путь до файла исходных данных
+            encoding = CheckEncodingFile.detect_encoding(file_path) # Определяем кодировку файла
+
+            raw_df= self.model.load_boiler_data(file_path,encoding)
+            self.model.save_intermedia(raw_df, "Boiler_data",True)
+            df = self.model.load_boiler_file(file_path, encoding)
+            df = self.model.process_data(df)
+            result = self.model.group_new_data(df)
+
             self.logger.info("Все данные успешно обработаны и сохранены")
             showinfo("Успех", "Данные котельной успешно загружены и обработаны!")
 

@@ -19,7 +19,7 @@ import pandas as pd
 from matplotlib.pyplot import title
 
 from gui.Work_table import BaseTableManager
-# from utils import *
+from utils import *
 
 # Create module alias for backward compatibility with pickled objects
 # This allows pickle to find the old module structure when deserializing
@@ -235,44 +235,129 @@ class Data_model:
             self.logger.exception(f"Ошибка при открытии конфигурации - {e}")
             showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
 
-    # Сохранение/загрузка конфигурации расчета
-    def load_boiler_data(self, file_path:str):
+    # Загрузка данных котельной из файла
+
+    def load_boiler_file(self, file_path:str,encoding : str) -> pd.DataFrame:
+        """
+           Загружает необработанные данные из CSV
+        """
+        try:
+            df_raw = pd.read_csv(file_path, delimiter=';', skiprows=2, encoding=encoding)
+
+            return df_raw
+
+        except Exception as e:
+            pass
+
+    def process_data(self,df_row : pd.DataFrame):
+        """
+            Выполняет предварительную обработку данных
+        """
+        # Удаляем строки "Максимум" и "Минимум" (проверяем по первому столбцу)
+        mask = ~df_row.iloc[:, 0].isin(['Максимум', 'Минимум'])
+        df_raw = df_row[mask]
+
+        # Проверяем, что данные есть
+        if df_raw.empty:
+            raise ValueError("Файл пустой или не содержит данных после фильтрации")
+
+        # Убираем первый столбец (названия сценариев) и сбрасываем индекс
+        df_processed = df_raw.iloc[:, 1:].reset_index(drop=True)
+
+        # Переименовываем столбцы в более удобный формат
+        if len(df_processed.columns) >= 4:
+            column_mapping = {
+                df_processed.columns[0]: 'InputPressure',  # "1.1 - Давление"
+                df_processed.columns[1]: 'OutputPressure',  # "4.3 - Давление"
+                df_processed.columns[2]: 'Nm3h',  # "Q-4 - Масс. расх."
+                df_processed.columns[3]: 'C'  # "Q-4 - Тепловой поток"
+            }
+            df_processed.rename(columns=column_mapping, inplace=True)
+        else:
+            raise ValueError(
+                f"Недостаточно столбцов в файле. Ожидалось минимум 4, получено {len(df_processed.columns)}")
+        return df_processed
+
+
+    def group_new_data(self,df_processed: pd.DataFrame) -> pd.DataFrame:
+        # Группируем по выходному давлению (MPAout)
+        grouped = df_processed.groupby('OutputPressure')
+
+        # Создаем пустой DataFrame для всех данных
+        result_df = pd.DataFrame()
+        processed_count = 0
+
+        for outpressure, group_data in grouped:
+            # Берем нужные столбцы
+            if not all(col in group_data.columns for col in ['InputPressure', 'Nm3h', 'C']):
+                self.logger.warning(f"Недостаточно данных для давления {outpressure}")
+                continue
+
+            # Создаем словарь для данных текущей группы
+            row_data = {}
+
+            # Проходим по каждой строке в группе
+            for _, row in group_data.iterrows():
+                input_pressure = row['InputPressure']
+                nm3h = row['Nm3h']
+                c_value = row['C']
+
+                # Формируем название столбца
+                col_name = f"Pin_{str(input_pressure).replace('.', '_')}"
+
+                # Формируем значение в нужном формате [[Nm3h, C]]
+
+                # row_data[col_name] = [[nm3h, c_value]]
+                parameters_json = json.dumps({'Nm3h': nm3h, 'C': c_value}, ensure_ascii=False)
+                row_data[col_name] = parameters_json
+
+            # Добавляем строку в результирующий DataFrame
+            result_df = pd.concat([result_df, pd.DataFrame([row_data], index=[f"Pout_{str(outpressure)}"])])
+            processed_count += 1
+
+        # Сортируем индекс (выходное давление)
+        result_df.sort_index(inplace=True)
+
+        return result_df
+
+
+
+    def load_boiler_data(self, file_path:str,encoding : str):
         """
         Загружает и обрабатывает данные котельной из CSV файла.
         """
         try:
-            encoding = GetFilePatch.detect_encoding(file_path)
-            df_raw = pd.read_csv(file_path, delimiter=';', skiprows=2, encoding=encoding)
 
+            df_raw = self.load_boiler_file(file_path,encoding)
 
             # Удаляем строки "Максимум" и "Минимум" (проверяем по первому столбцу)
             mask = ~df_raw.iloc[:, 0].isin(['Максимум', 'Минимум'])
             df_raw = df_raw[mask]
-            
+
             # Проверяем, что данные есть
             if df_raw.empty:
                 raise ValueError("Файл пустой или не содержит данных после фильтрации")
-            
+
             # Убираем первый столбец (названия сценариев) и сбрасываем индекс
             df_processed = df_raw.iloc[:, 1:].reset_index(drop=True)
-            
+
             # Переименовываем столбцы в более удобный формат
             if len(df_processed.columns) >= 4:
                 column_mapping = {
-                    df_processed.columns[0]: 'InputPressure',      # "1.1 - Давление"
-                    df_processed.columns[1]: 'OutputPressure',       # "4.3 - Давление"
-                    df_processed.columns[2]: 'Nm3h',        # "Q-4 - Масс. расх."
-                    df_processed.columns[3]: 'C'            # "Q-4 - Тепловой поток"
+                    df_processed.columns[0]: 'InputPressure',  # "1.1 - Давление"
+                    df_processed.columns[1]: 'OutputPressure',  # "4.3 - Давление"
+                    df_processed.columns[2]: 'Nm3h',  # "Q-4 - Масс. расх."
+                    df_processed.columns[3]: 'C'  # "Q-4 - Тепловой поток"
                 }
                 df_processed.rename(columns=column_mapping, inplace=True)
             else:
-                raise ValueError(f"Недостаточно столбцов в файле. Ожидалось минимум 4, получено {len(df_processed.columns)}")
-            
-            self.logger.info(f"Файл успешно загружен и предварительно обработан: {file_path}")
-            print(f"После предварительной обработки:\n{df_processed}")
+                raise ValueError(
+                    f"Недостаточно столбцов в файле. Ожидалось минимум 4, получено {len(df_processed.columns)}")
+
 
             # Группируем по выходному давлению (MPAout)
             grouped = df_processed.groupby('OutputPressure')
+            print(f"{grouped=}")
 
 
             # Создаем пустой DataFrame для всех данных
@@ -280,6 +365,7 @@ class Data_model:
             processed_count = 0
             
             for outpressure, group_data in grouped:
+                print(f"{group_data=}")
                 # Берем нужные столбцы
                 if not all(col in group_data.columns for col in ['InputPressure', 'Nm3h', 'C']):
                     self.logger.warning(f"Недостаточно данных для давления {outpressure}")
@@ -312,6 +398,8 @@ class Data_model:
             
             print("Итоговая таблица:")
             print(result_df)
+
+            return result_df
         
                 
                 # Сохраняем преобразованные данные

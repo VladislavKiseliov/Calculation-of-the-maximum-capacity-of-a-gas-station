@@ -25,7 +25,7 @@ class Initial_data:
     Responsible for:
     - Main button interface for data input sections
     - Gas composition input dialog
-    - Temperature input dialog  
+    - Temperature input dialog      
     - Pressure range input dialogs
     """
 

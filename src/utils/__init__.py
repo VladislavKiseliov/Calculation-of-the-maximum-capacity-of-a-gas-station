@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-from GetFilePatch import *
-from logger_config import setup_logger
+from .GetFilePatch import *
+from .logger_config import setup_logger
 
 
 """
