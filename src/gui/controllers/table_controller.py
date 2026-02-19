@@ -12,10 +12,29 @@ import logging
 from tkinter import messagebox
 from tkinter.messagebox import showinfo
 from typing import Dict
-from tkinter import filedialog, messagebox
 
-from utils import *
-from gui.Work_table import BaseTableManager, TableFactory
+from utils.GetFilePatch import GetFilePatch, CheckEncodingFile
+from core.table_domain import BaseTableManager, TableFactory
+
+
+def normalize_table_row(raw_data):
+    """
+    Normalize loaded table payload to a single dict row for GUI editor.
+
+    Supported formats:
+    - None -> {}
+    - dict -> dict
+    - list[dict] -> first dict or {}
+    """
+    if raw_data is None:
+        return {}
+    if isinstance(raw_data, dict):
+        return raw_data
+    if isinstance(raw_data, list):
+        if raw_data and isinstance(raw_data[0], dict):
+            return raw_data[0]
+        return {}
+    return {}
 
 
 class TableController:
@@ -64,13 +83,21 @@ class TableController:
    
     def open_table(self, table_name, table_type):
         """Open existing table or create new one if doesn't exist."""
+        if not table_name:
+            messagebox.showwarning("Ошибка", "Введите название таблицы")
+            return
+
         if table_name not in self.tables:
             self.create_table(table_name, table_type)
+        if table_name not in self.tables:
+            # create_table may fail (invalid type/name)
+            return
 
         if table_type == "Таблица котельной":
             self.load_boiler_data()
         else:
-            data = self.model.get_table_data(table_name)[0]
+            raw_data = self.model.get_table_data(table_name)
+            data = normalize_table_row(raw_data)
             self.guitable.open_table_window(
                 table_name, 
                 self.tables[table_name].get_columns(), 
@@ -97,11 +124,12 @@ class TableController:
             file_path = GetFilePatch.get_file_patch_csv("Выберете файл данных для котельной") # Получаем путь до файла исходных данных
             encoding = CheckEncodingFile.detect_encoding(file_path) # Определяем кодировку файла
 
-            raw_df= self.model.load_boiler_data(file_path,encoding)
-            self.model.save_intermedia(raw_df, "Boiler_data",True)
+            raw_df = self.model.load_boiler_data(file_path, encoding)
+            self.model.save_intermedia(raw_df, "Boiler_data_raw", True)
             df = self.model.load_boiler_file(file_path, encoding)
             df = self.model.process_data(df)
             result = self.model.group_new_data(df)
+            self.model.save_intermedia(result, "Boiler_data", True)
 
             self.logger.info("Все данные успешно обработаны и сохранены")
             showinfo("Успех", "Данные котельной успешно загружены и обработаны!")

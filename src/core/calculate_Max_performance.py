@@ -10,6 +10,7 @@ from functools import lru_cache
 class Max_performance:
     def __init__(self):
         self.logger = logging.getLogger("App.Max_performance")
+        self.boiler_data = []
         self._calculation_stats = {
             'tube_calculations': 0,
             'regulator_calculations': 0,
@@ -68,17 +69,17 @@ class Max_performance:
             self.logger.error(f"Ошибка расчета регулятора (Pin={col_pressure}, Pout={p_out}): {e}")
             raise
     
-    def _calculate_heat_balanc(self, col_pressure: float, p_out: float):
+    def _calculate_heat_balanc(self, col_pressure: float, p_out: float, data: Dict[str, Any]):
         """Расчет теплового баланса с использованием загруженных данных котельной"""
         self.logger.debug(f"Расчет теплового баланса из файла: Pin={col_pressure} МПа, Pout={p_out} МПа")
         
         try:
-            # Получаем данные котельной из базы данных
-            boiler_data = self.model.get_table_data("Boiler_data")
+            # Получаем данные котельной из предварительно загруженного кэша
+            boiler_data = self.boiler_data
             
             if not boiler_data:
-                self.logger.error("Данные котельной не найдены в базе данных")
-                raise ValueError("Данные котельной не загружены")
+                self.logger.warning("Данные котельной не найдены, используем расчет по мощности котельной")
+                return self._calculate_heat_balance(col_pressure, p_out, data)
             
             # Формируем ключи для поиска данных
             col_name = f"Pin_{str(col_pressure).replace('.', '_')}"
@@ -120,7 +121,7 @@ class Max_performance:
         except Exception as e:
             self.logger.error(f"Ошибка расчета теплового баланса из файла (Pin={col_pressure}, Pout={p_out}): {e}")
             # Fallback к стандартному расчету
-            return self._calculate_heat_balance_fallback(col_pressure, p_out)
+            return self._calculate_heat_balance_fallback(col_pressure, p_out, data)
 
 
 
@@ -146,6 +147,64 @@ class Max_performance:
         except Exception as e:
             self.logger.error(f"Ошибка расчета теплового баланса (Pin={col_pressure}, Pout={p_out}): {e}")
             raise
+
+    def _find_nearest_pressure_data(self, boiler_data: List[Dict[str, Any]], p_out: float):
+        """Find nearest Pout row in boiler data if exact match is absent."""
+        nearest_row = None
+        min_delta = float("inf")
+        for row in boiler_data:
+            row_key = row.get("index")
+            if not row_key or not str(row_key).startswith("Pout_"):
+                continue
+            try:
+                row_p_out = float(str(row_key).replace("Pout_", ""))
+            except ValueError:
+                continue
+            delta = abs(row_p_out - float(p_out))
+            if delta < min_delta:
+                min_delta = delta
+                nearest_row = row
+        return nearest_row
+
+    def _interpolate_boiler_data(self, target_row: Dict[str, Any], col_pressure: float):
+        """Interpolate Nm3h from nearest Pin columns in one boiler row."""
+        points = []
+        for key, value in target_row.items():
+            if not str(key).startswith("Pin_"):
+                continue
+            try:
+                pin = float(str(key).replace("Pin_", "").replace("_", "."))
+                import json
+                payload = json.loads(value) if isinstance(value, str) else value
+                nm3h = float(payload["Nm3h"])
+                points.append((pin, nm3h))
+            except Exception:
+                continue
+
+        if not points:
+            raise ValueError("Невозможно интерполировать: отсутствуют точки Pin/Nm3h")
+
+        points.sort(key=lambda x: x[0])
+        x = float(col_pressure)
+
+        if x <= points[0][0]:
+            return points[0][1]
+        if x >= points[-1][0]:
+            return points[-1][1]
+
+        for i in range(len(points) - 1):
+            x1, y1 = points[i]
+            x2, y2 = points[i + 1]
+            if x1 <= x <= x2:
+                if x2 == x1:
+                    return y1
+                return y1 + (y2 - y1) * ((x - x1) / (x2 - x1))
+
+        return points[-1][1]
+
+    def _calculate_heat_balance_fallback(self, col_pressure: float, p_out: float, data: Dict[str, Any]):
+        """Fallback to formula-based heat balance."""
+        return self._calculate_heat_balance(col_pressure, p_out, data)
     
     @lru_cache(maxsize=128)
     def _calculate_propertys_gaz(self, gas_pressure_mpa: float, gas_temperature_c: float) -> Tuple:
@@ -190,8 +249,7 @@ class Max_performance:
 
                     
                 case "Таблица котельной":
-                    result = self._calculate_heat_balanc(col_pressure, P_out)
-                    # result = self._calculate_heat_balance(col_pressure, P_out, data)
+                    result = self._calculate_heat_balanc(col_pressure, P_out, data)
                     self.logger.debug(f"Котельная: {result}")
                     
                 case _:
@@ -206,6 +264,7 @@ class Max_performance:
             error_msg = f"Ошибка при расчёте таблицы '{table_name}' (Pin={col_pressure}, Pout={P_out}): {e}"
             self.logger.error(error_msg)
             self.logger.exception(e)
+            df.at[table_name, col_name] = float("nan")
 
     def _full_calculate(self, P_out: float,table_data,tables) -> pd.DataFrame:
         """Основной метод расчета"""
@@ -275,8 +334,16 @@ class Max_performance:
 
 
 
-    def calculate(self,p_in: list, p_out: float , tables: dict, 
-                 temperature: dict, gas_composition: dict, table_data) -> pd.DataFrame:
+    def calculate(
+        self,
+        p_in: list,
+        p_out: float,
+        tables: dict,
+        temperature: dict,
+        gas_composition: dict,
+        table_data,
+        boiler_data: List[Dict[str, Any]] | None = None,
+    ) -> pd.DataFrame:
         """
         Выполняет расчет максимальной производительности
         """
@@ -292,6 +359,7 @@ class Max_performance:
         self.tables_data = tables
         self.temperature = temperature
         self.gas_composition = gas_composition
+        self.boiler_data = boiler_data or []
         print(f"{self.input_pressure_range=}")
 
         try:

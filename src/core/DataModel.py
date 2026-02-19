@@ -4,26 +4,32 @@ import json
 import logging
 import os
 import sqlite3
-import tkinter as ttk
-from tkinter import filedialog, messagebox
-from tkinter.messagebox import showinfo, showwarning
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List
 import pickle
-import json
-import base64
 import sys
 
 
 import numpy as np
 import pandas as pd
-from matplotlib.pyplot import title
 
-from gui.Work_table import BaseTableManager
-from utils import *
+from core.table_domain import BaseTableManager
 
-# Create module alias for backward compatibility with pickled objects
-# This allows pickle to find the old module structure when deserializing
-sys.modules['Work_table'] = sys.modules['gui.Work_table']
+# Backward-compatible aliases for old pickled objects
+import core.table_domain as table_domain
+sys.modules["Work_table"] = table_domain
+sys.modules["gui.Work_table"] = table_domain
+
+
+@dataclass
+class ModelSnapshot:
+    gas_composition: Dict[str, float]
+    input_pressure_range: List[float]
+    output_pressure_range: List[float]
+    temperature: Dict[str, float]
+    table_specs: Dict[str, Dict[str, Any]]
+    table_parameters: Dict[str, Dict[str, Any]]
+    boiler_data: List[Dict[str, Any]]
 
 
 class Data_model:
@@ -43,11 +49,21 @@ class Data_model:
         self.saves_dir = "Saves"
 
     # Работа с давлением
+    @staticmethod
+    def _read_pressure_value(pressure: Dict[str, float], key: str) -> float:
+        """Read pressure value by key with/without trailing colon support."""
+        if key in pressure:
+            return pressure[key]
+        alt_key = f"{key}:"
+        if alt_key in pressure:
+            return pressure[alt_key]
+        raise KeyError(key)
+
     def _calculate_pressure_range(self, pressure :Dict[str,float]) -> List[float]:
         try:
-            min_pressure = pressure["Минимальное давление"]
-            max_pressure = pressure["Максимальное давление"]
-            step = pressure["Шаг значения"]
+            min_pressure = self._read_pressure_value(pressure, "Минимальное давление")
+            max_pressure = self._read_pressure_value(pressure, "Максимальное давление")
+            step = self._read_pressure_value(pressure, "Шаг значения")
             # Проверка корректности данных
             if min_pressure > max_pressure:
                 raise ValueError("Ошибка: Минимальное давление больше максимального.")
@@ -119,16 +135,9 @@ class Data_model:
 
         # Проверяем, что сумма процентов равна 100%
         if abs(total_percentage - 100.0) > 0.001:  # Допускаем небольшую погрешность
-            print(f"{abs(total_percentage - 100.0)=}")
-            self.logger.error(
-                "Ошибка",
-                f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%",
-            )
-            showwarning(
-                "Ошибка",
-                f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%",
-            )
-            return
+            msg = f"Сумма процентов должна быть равна 100%. Сейчас: {total_percentage:.4f}%"
+            self.logger.error(msg)
+            raise ValueError(msg)
         return gas_composition
 
     def save_sostav_gaz(self,  composition: Dict[str, str]):
@@ -166,13 +175,48 @@ class Data_model:
             self.logger.exception(
                 f"Неожиданная ошибка при добавлении таблицы '{table_name}' в базу данных"
             )
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+            raise
   
     def get_table_data(self, table_name) -> List[Dict[str, Any]]:
-        df = self.data_base_manager.get_data_table("Boiler_data")
-        # print(f"{df['index']=}")
-        # print(f"{df['Pin_6_0']=}")
         return self.data_base_manager.load_data(table_name)
+
+    def get_db_table(self, table_name: str) -> List[Dict[str, Any]]:
+        """Получить произвольную таблицу из SQLite как список словарей."""
+        return self.data_base_manager.get_data_table(table_name)
+
+    def get_snapshot(self, include_boiler_data: bool = True) -> ModelSnapshot:
+        """Return full model state as a dataclass snapshot."""
+        table_specs = {}
+        table_parameters = {}
+        tables = self.get_table_manager() or {}
+
+        for table_name, manager in tables.items():
+            table_specs[table_name] = {
+                "table_type": manager.get_table_type(),
+                "columns": manager.get_columns(),
+            }
+            table_parameters[table_name] = self.get_table_data(table_name) or {}
+
+        boiler_data = []
+        if include_boiler_data:
+            try:
+                boiler_data = self.get_db_table("Boiler_data") or []
+            except Exception:
+                boiler_data = []
+
+        return ModelSnapshot(
+            gas_composition=dict(self.load_gas_composition() or {}),
+            input_pressure_range=list(self.get_pressure_range("input") or []),
+            output_pressure_range=list(self.get_pressure_range("output") or []),
+            temperature=dict(self.get_temperature() or {}),
+            table_specs=table_specs,
+            table_parameters=table_parameters,
+            boiler_data=boiler_data,
+        )
+
+    def get_all_data(self, include_boiler_data: bool = True) -> Dict[str, Any]:
+        """Return full model state as a plain dict (for API/serialization/UI output)."""
+        return asdict(self.get_snapshot(include_boiler_data=include_boiler_data))
 
     def save_table(self,dtables: Dict[str, BaseTableManager]):
         self.data_storage.table_manager.update(dtables)
@@ -181,7 +225,7 @@ class Data_model:
         self.data_base_manager.save(df,name_table,index_flag)
 
     # Сохранение/загрузка конфигурации расчета 
-    def export_config(self):
+    def export_config(self, file_path: str):
         """Экспорт сохранения в файл .json"""
         try:
             tables = self.get_table_manager()
@@ -202,20 +246,18 @@ class Data_model:
                         "temperature": self.get_temperature(),
                         "table_name": table_data
                     }
-            self.json_manager.save_configure(file)
+            self.json_manager.save_configure(file, file_path)
             self.logger.info("Сохранение успошно сохранено в json")
-
-            showinfo("Успех", "Конфигурация успешно сохранена")
 
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранения конфигурации - {e}")
-            showwarning("Ошибка", "При сохранении исходных данных в файл возникла ошибка")
+            raise
  
-    def import_config(self):
+    def import_config(self, file_path: str):
         """Импорт сохранения из файла .json"""
         
         try:
-            data = self.json_manager.load_data()
+            data = self.json_manager.load_data(file_path)
             self.save_sostav_gaz(data["gas_composition"])
             self.save_temp(data["temperature"])
             self.data_storage.set_pressure_range("input",data["input_pressure_range"])
@@ -229,11 +271,9 @@ class Data_model:
                 self.create_db_table(table_name,table_manager.get_table_type(),data["table_name"][table_name][1])
             self.logger.info(f"Данные их сохранения успешно загруженны! Данные: {data}")
 
-            showinfo("Успех", "Данные успешно добавленны")
-
         except Exception as e:
             self.logger.exception(f"Ошибка при открытии конфигурации - {e}")
-            showwarning("Ошибка", "При вставке исходных данных из сохранения возникла ошибка")
+            raise
 
     # Загрузка данных котельной из файла
 
@@ -247,7 +287,8 @@ class Data_model:
             return df_raw
 
         except Exception as e:
-            pass
+            self.logger.exception(f"Ошибка чтения файла котельной: {e}")
+            raise
 
     def process_data(self,df_row : pd.DataFrame):
         """
@@ -357,7 +398,6 @@ class Data_model:
 
             # Группируем по выходному давлению (MPAout)
             grouped = df_processed.groupby('OutputPressure')
-            print(f"{grouped=}")
 
 
             # Создаем пустой DataFrame для всех данных
@@ -365,7 +405,6 @@ class Data_model:
             processed_count = 0
             
             for outpressure, group_data in grouped:
-                print(f"{group_data=}")
                 # Берем нужные столбцы
                 if not all(col in group_data.columns for col in ['InputPressure', 'Nm3h', 'C']):
                     self.logger.warning(f"Недостаточно данных для давления {outpressure}")
@@ -395,9 +434,6 @@ class Data_model:
             
             # Сортируем индекс (выходное давление)
             result_df.sort_index(inplace=True)
-            
-            print("Итоговая таблица:")
-            print(result_df)
 
             return result_df
         
@@ -406,7 +442,6 @@ class Data_model:
             self.save_intermedia(result_df, "Boiler_data",True)
 
             a=self.get_table_data("Boiler_data")
-            print(f"{a=}")
  
                     
         # except Exception as e:
@@ -484,7 +519,9 @@ class DataBaseManager:
         # Определяем путь к базе данных относительно корня проекта
         import os
         current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        self.db_path = os.path.join(current_dir, "data", "database", "tables.db")
+        db_dir = os.path.join(current_dir, "data", "database")
+        os.makedirs(db_dir, exist_ok=True)
+        self.db_path = os.path.join(db_dir, "tables.db")
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
         self._create_initial_data_table()
@@ -544,7 +581,6 @@ class DataBaseManager:
         self.logger.info(f"Начинаем сохранение данных таблицы '{table_name}'")
         try:
             self.logger.debug(f"Данные для сохранения: {data}")
-            print(data[table_name])
         
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -554,17 +590,16 @@ class DataBaseManager:
                     data[table_name],
                 )
             self.logger.info(f"Данные таблицы '{table_name}' успешно сохранены")
-            showinfo("Успех", "Данные успешно сохранены")
 
         except sqlite3.OperationalError as e:
             self.logger.error(f"Ошибка сохранения таблицы '{table_name}': {e}")
-            messagebox.showerror("Ошибка", f"Не удалось сохранить таблицу: {e}")
+            raise
 
         except Exception as e:
             self.logger.exception(
                 f"Неожиданная ошибка при сохранении таблицы '{table_name}'"
             )
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+            raise
 
     def load_data(self, constraints: str) -> Dict[str, float]:
         """Загружает данные таблицы в Treeview."""
@@ -589,15 +624,13 @@ class DataBaseManager:
 
         except sqlite3.OperationalError as e:
             self.logger.error(f"Ошибка загрузки таблицы '{constraints}': {e}")
-            messagebox.showerror("Ошибка", f"Не удалось загрузить таблицу: {e}")
-            return []
+            raise
 
         except Exception as e:
             self.logger.exception(
                 f"Неожиданная ошибка при загрузке таблицы '{constraints}'"
             )
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
-            return []
+            raise
 
     def create_table(self, table_name : str, parametr_table : Dict[str,float]):
         """Create table in databaze"""
@@ -641,12 +674,12 @@ class DataBaseManager:
         except sqlite3.OperationalError as e:
             self.logger.error(f"Ошибка SQLite при создании таблицы '{table_name}': {e}")
             self.logger.error(f"Запрос: {create_table_query}")
-            messagebox.showerror("Ошибка", f"Не удалось создать таблицу: {e}")
+            raise
         except Exception as e:
             self.logger.exception(
                 f"Неожиданная ошибка при создании таблицы '{table_name}'"
             )
-            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
+            raise
         else:
             self.logger.info(
                 f"Таблица '{table_name}' успешно создана и инициализирована"
@@ -681,7 +714,7 @@ class DataBaseManager:
 
         except Exception as e:
             self.logger.exception(f"Ошибка при создании таблицы '{table_name}': {e}")
-            messagebox.showerror("Ошибка", f"Не удалось создать таблицу: {e}")
+            raise
 
     def get_data_table(self, name_table) -> List[Dict[str, Any]]:  # убрать оттуда
         """Получение данных из базы данных."""
@@ -693,10 +726,7 @@ class DataBaseManager:
         return df.to_dict(orient="records")  # Список словарей
     
     def save(self,df,name_P_out,index_flag = False):
-
-        print(f"{name_P_out=}")
         column = df.columns.tolist()
-        print(f"{df.index.tolist()=}")
         # Формируем SQL-определение столбцов
         column_definitions = ", ".join([f"{col} REAL" for col in column])
         with sqlite3.connect(self.db_path) as conn:
@@ -717,31 +747,17 @@ class JsonManager:
         current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.saves_dir = os.path.join(current_dir, "saves")
 
-    def save_configure(self, data):
+    def save_configure(self, data, file_path: str):
         
         os.makedirs(self.saves_dir, exist_ok=True)  # Создаем директорию, если её нет
-
-        file_path = filedialog.asksaveasfilename(
-            title="Сохранить файл",
-            initialdir=self.saves_dir,
-            defaultextension=".json",  # Расширение по умолчанию
-            filetypes=[
-                ("JSON files", "*.json"),
-                ("All files", "*.*"),
-            ],  # Фильтр типов файлов
-        )
+        if not file_path:
+            raise ValueError("Путь для сохранения конфигурации не задан")
         with open(file_path, "w", encoding="utf-8") as outfile:
             json.dump(data, outfile, indent=4, ensure_ascii=False)
 
-    def load_data(self):
-        file_path = filedialog.askopenfilename(
-            title="Выберите файл для загрузки состава газа",
-            defaultextension=".json",  # Расширение по умолчанию
-            filetypes=[
-                ("JSON files", "*.json"),
-                ("All files", "*.*"),
-            ],  # Фильтр типов файлов
-        )
+    def load_data(self, file_path: str):
+        if not file_path:
+            raise ValueError("Путь для загрузки конфигурации не задан")
         with open(file_path, "r", encoding="utf-8") as outfile:
             data = json.load(outfile)
 
@@ -761,7 +777,9 @@ class DataStorage:
         # Определяем путь к базе данных относительно корня проекта
         import os
         current_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        self.db_path = os.path.join(current_dir, "data", "database", "tables.db")
+        db_dir = os.path.join(current_dir, "data", "database")
+        os.makedirs(db_dir, exist_ok=True)
+        self.db_path = os.path.join(db_dir, "tables.db")
 
     @property
     def data_gas_composition(self) -> Dict[str, float]:
@@ -798,8 +816,6 @@ class DataStorage:
             # Если всё успешно
             setattr(self, f"{pressure_type}_pressure_range", pressure_range)
             self.logger.info(f"Данные диапазона {pressure_type} давления сохранены")
-
-            print(getattr(self, f"{pressure_type}_pressure_range"))
    
         except Exception as e:
             self.logger.error(f"Не удалось сохранить данные: {e}")
@@ -812,7 +828,6 @@ class DataStorage:
     @table_manager.setter
     def table_manager(self, tables: Dict[str, BaseTableManager]):
         self.tables_data.update(tables)
-        print(self.tables_data)
         # for i in self.tables_data:
         #     # print(f"{self.tables_data[i].get_table_type()=}")
         self.logger.info(f"Данные таблицы {self.tables_data} добавлены в Data_model")

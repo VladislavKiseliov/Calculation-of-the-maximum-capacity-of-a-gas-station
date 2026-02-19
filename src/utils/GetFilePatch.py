@@ -1,7 +1,11 @@
 from tkinter import filedialog
 import pandas as pd
-import chardet
 from typing import Optional
+
+try:
+    import chardet
+except ImportError:
+    chardet = None
 
 
 class GetFilePatch:
@@ -37,13 +41,30 @@ class CheckEncodingFile:
             :return: Предполагаемая кодировка файла (строка) или None, если не удалось определить.
             """
         try:
-            # Читаем небольшой кусок файла в бинарном режиме
-            with open(file_path, 'rb') as f:
+            # Читаем файл в бинарном режиме
+            with open(file_path, "rb") as f:
                 raw_data = f.read()
-                result = chardet.detect(raw_data)
 
-                # Возвращаем кодировку или None, если chardet не смог её определить
-                return result['encoding']
+            # Если chardet установлен, используем его
+            if chardet is not None:
+                result = chardet.detect(raw_data)
+                encoding = result.get("encoding")
+                if encoding:
+                    return encoding
+
+            # Fallback без chardet: простая проверка популярных кодировок
+            if raw_data.startswith(b"\xef\xbb\xbf"):
+                return "utf-8-sig"
+
+            for candidate in ("utf-8", "cp1251"):
+                try:
+                    raw_data.decode(candidate)
+                    return candidate
+                except UnicodeDecodeError:
+                    continue
+
+            # Последний безопасный вариант
+            return "latin-1"
 
         except FileNotFoundError:
             # Обработка случая, когда файл не существует

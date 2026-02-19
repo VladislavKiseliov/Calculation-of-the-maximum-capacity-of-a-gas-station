@@ -16,6 +16,13 @@ from typing import Dict, List
 from ..main_window import WidgetFactory
 
 
+def build_initial_row(columns: list, data: Dict[str, float] | None) -> List:
+    """Build one editable row aligned with columns."""
+    if not data:
+        return ["-"] * len(columns)
+    return [data.get(col, "-") for col in columns]
+
+
 class GuiTable:
     """
     GUI component for managing table interfaces.
@@ -106,10 +113,7 @@ class GuiTable:
         self.logger.info(f"Открытие окна таблицы '{self.table_name}'")
 
         # Prepare initial data
-        if data is not None:
-            init_data = list(data.values())
-        else:
-            init_data = ["-"] * len(columns)
+        init_data = build_initial_row(columns, data)
 
         self.logger.debug(f"Данные для инициализации: {data}")
         
@@ -161,7 +165,11 @@ class GuiTable:
         column_index = int(column[1:]) - 1  # Column index (starting from 0)
 
         # Get current cell value
-        current_value = self.tree.item(item_id)["values"][column_index]
+        values = list(self.tree.item(item_id)["values"])
+        if len(values) < len(self.tree["columns"]):
+            values.extend(["-"] * (len(self.tree["columns"]) - len(values)))
+            self.tree.item(item_id, values=values)
+        current_value = values[column_index]
 
         # Create Entry widget for editing
         entry = ttk.Entry(self.tree)

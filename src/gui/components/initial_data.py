@@ -236,16 +236,19 @@ class Initial_data:
             )
             entry = WidgetFactory.create_entry(self.pressure_window, row=i, column=1)
             self.pressure_entries[labels[i]] = entry
+
+        # Pre-fill from existing range when available.
+        # Important: even with malformed/short data, window must stay usable.
         if init_pressure:
-            self.pressure_entries["Минимальное давление"].insert(
-                0, min(init_pressure)
-            )
-            self.pressure_entries["Максимальное давление"].insert(
-                0, max(init_pressure)
-            )
-            self.pressure_entries["Шаг значения"].insert(
-                0, round(init_pressure[1] - init_pressure[0], 2)
-            )
+            try:
+                self.pressure_entries["Минимальное давление:"].insert(0, min(init_pressure))
+                self.pressure_entries["Максимальное давление:"].insert(0, max(init_pressure))
+                if len(init_pressure) >= 2:
+                    step = round(float(init_pressure[1]) - float(init_pressure[0]), 2)
+                    self.pressure_entries["Шаг значения"].insert(0, step)
+            except Exception:
+                # Keep dialog open and editable instead of failing before Save button creation.
+                pass
 
 
         # Create save button
@@ -260,12 +263,18 @@ class Initial_data:
         """Get data from gas station data."""
         if component == "pressure":
             try:
+                field_map = {
+                    "Минимальное давление:": "Минимальное давление",
+                    "Максимальное давление:": "Максимальное давление",
+                    "Шаг значения": "Шаг значения",
+                }
                 data = {}
-                for component, entry in self.pressure_entries.items():
-                    if pressure := self.pressure_entries[component].get():
-                        data[component] = float(entry.get().replace(",", "."))
+                for raw_key, entry in self.pressure_entries.items():
+                    normalized_key = field_map.get(raw_key, raw_key.rstrip(":"))
+                    if pressure := entry.get():
+                        data[normalized_key] = float(pressure.replace(",", "."))
                     else:
-                        showwarning("Ошибка", f"Введите значение для {component}")
+                        showwarning("Ошибка", f"Введите значение для {normalized_key}")
                         return
                 return data
             except ValueError as e:
@@ -286,7 +295,10 @@ class Initial_data:
 
         elif component == "gas_composition":
             data = {}
-            for component, entry in self.temperature_entries.items():
+            if not self.entries:
+                showwarning("Ошибка", "Окно состава газа не инициализировано")
+                return {}
+            for component, entry in self.entries.items():
                 try:
                     data[component] = float(entry.get().replace(",", "."))
                 except ValueError:
